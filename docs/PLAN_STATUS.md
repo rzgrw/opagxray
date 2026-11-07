@@ -1,8 +1,8 @@
-# Plan status — 2026-11-07
+# Plan status — 2026-11-08
 
 ## Windows transfer — 2026-11-07
 
-Current execution is moving to Windows. Read [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md) before resuming: it records the reviewed menu repair, final Mac runtime results, WIP provenance/overhead branches, Windows bridge/export/build gaps and transfer recovery instructions. Historical checklist and benchmark claims remain subject to their original platform/evidence limits. All build/test/live results recorded below are macOS runs; none has been repeated on Windows.
+Current execution is moving to Windows. Read [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md) before resuming: it records the reviewed menu repair, final Mac runtime results, WIP provenance/overhead branches, Windows bridge/export/build gaps and transfer recovery instructions. Historical checklist and benchmark claims remain subject to their original platform/evidence limits. Build, test, and live results below are macOS runs unless a 2026-11-08 section names a Windows command. The full engine has still not been built on Windows. The standalone `xrSimCore` tests in the Gate 1 recovery section are the exception.
 
 ## Repository and branch policy — 2026-11-07
 
@@ -52,9 +52,9 @@ history rather than instructions to replay every commit.
 | [Async actor provider](superpowers/plans/2026-07-14-async-live-actor-provider.md) | Shipped: `9cf56d00c`, `e19a9a47d`, `f66aafd34`, contract hardening `96142b7c0`; fresh hardened-prompt non-coast acceptance still open. |
 | [Frame-time measurement](superpowers/plans/2026-11-07-frame-time-measurement.md) | Shipped infrastructure: recorder/reports `e3f273f04`, opt-in GL telemetry + `perf.*` bridge export `a389540d8`, readiness/visibility classification `456808010`, provenance sidecars `90c6e57e6`. No accepted capture or measured gain; Windows export unavailable. Overhead experiment is WIP in the `archive/rzgrw/frame-overhead-*` tags. |
 | Menu reload repair | Shipped: `604fb0690` (failure ownership, activation-effect restore, `xrMainMenuReloadTests`). Recorded macOS focused/sanitizer tests and two private live saved-load lifecycles; root cause of the wrong factory type unknown; Windows unverified. |
-| [Metal SP2](superpowers/plans/2026-03-29-sp2-metal-renderer.md) | M-R0/menu shipped (`1ed42b1f1`, merge `4dba4ecd1`); M-R1 parked at unmerged `caa2e4953` (tag `archive/feat/metal-mr1-ingame`). Resume details in [HANDOVER](HANDOVER.md). |
+| [Metal SP2](superpowers/plans/2026-03-29-sp2-metal-renderer.md) | M-R0/menu shipped (`1ed42b1f1`, merge `4dba4ecd1`); M-R1 still parked at unmerged `caa2e4953` (tag `archive/feat/metal-mr1-ingame`). 2026-11-08 assessment: `git merge-tree` onto `dev` `437cca1aa` is clean, but the commit edits shared GL shader sources, so it stays archived. Not built here (no macOS). Resume details in [HANDOVER](HANDOVER.md). |
 | [Vulkan](superpowers/specs/2026-07-05-vulkan-renderer-roadmap.md) | Not started; native-renderer work paused. Metal on Mac / Vulkan on PC remains the long-term direction. |
-| [Gate 1 authority spine](superpowers/plans/2026-07-14-garbage-ai-authority-spine.md) | Task 1 selectively recovered and integrated at `04b4ef5b5` after independent review. Tasks 2 onward are not integrated; further AI expansion follows the runtime comparison. |
+| [Gate 1 authority spine](superpowers/plans/2026-07-14-garbage-ai-authority-spine.md) | Task 1 selectively recovered and integrated at `04b4ef5b5` after independent review. Standalone `xrSimCore` test project taken from `1d951aa07` (`tools/xrsim_standalone`). Tasks 2 onward, live wiring, and the reanimation proposal stay on the archive tag; further AI expansion follows the runtime comparison. |
 | [Old roadmap](superpowers/specs/2026-07-04-engine-v2-roadmap.md), [deterministic Zone](superpowers/specs/2026-07-05-zone-simulation-design.md), [streaming](superpowers/specs/2026-07-05-seamless-zone-streaming-design.md), [continuation](superpowers/CONTINUATION.md) | Superseded or parked; retain historical research and surviving invariants, not their execution order. |
 
 ## Gate 1 recovery and remaining gates
@@ -65,6 +65,29 @@ the standalone test seam at `1d951aa07`. This is recovery material, not a branch
 ready to merge or proof that all tasks are executable as written. The separate
 `f1222d148` reanimation document's Gemini/model/version-ladder changes are
 **PROPOSED, not approved**; they do not amend the current provider contract.
+
+### Selective recovery — 2026-11-08
+
+Branch `integrate/gate1-recovery` (from `dev` `437cca1aa`) takes one self-contained piece and leaves the rest on the tags.
+
+Taken from `1d951aa07` (partial): `tools/xrsim_standalone/CMakeLists.txt` and `tools/xrsim_standalone/build_and_test.sh` only. The project configures current `xrSimCore` and the two existing unit-test binaries without the engine. The `<chrono>` / `<thread>` include in that commit targeted the pre-recovery spine tests and was not replayed; Task 1 tests on `dev` already include what they use, and `xrSimWorldStateTests` already includes both headers.
+
+Left on `archive/codex/ai-authority-spine-gate1`:
+
+- `facec9eb9` — Tasks 1–9 substrate plus live bridge, `CLevel`, hit/death, and device wiring. Task 1 is already on `dev` as the repaired `04b4ef5b5` snapshot. Authority, the strict codec, and atomic commit stay queued behind the stability/performance comparison. The same commit also edits `res/gamedata/shaders/gl/ssao.ps` and the shared `cmp_pass` ordering in `r__dsgraph_render.cpp`, which would change GL output, so it is not a default-off substrate drop.
+- `3cf0a8543` — live zone runtime, materialize/steer, soak-script changes, and a bridge-only precache fallback in `device.cpp`. That changes runtime behaviour and is not behind an off-by-default switch.
+- `f1222d148` — reanimation plan plus HANDOVER and roadmap edits. The plan calls itself a plan of record and proposes the unapproved Gemini and V1 changes named above. It was not copied in. The tag remains the copy. Importing it under a banner would still put a contradictory "plan of record" in the tree.
+
+Windows evidence for the standalone project, 2026-11-08, VS 2022 Build Tools 17.14, MSVC 19.44.35229.0 (`cl.exe` under toolset 14.44.35207), CMake 3.31.6-msvc6, Ninja 1.12.1, curl not found. `vcvars64.bat` printed that `vswhere.exe` was not on PATH, then initialized x64. The full engine was not configured or built.
+
+```text
+cmake -S tools\xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-xrsim --parallel
+build-xrsim\xrSimAuthoritySpineTests.exe
+build-xrsim\xrSimWorldStateTests.exe
+```
+
+Configure reported `Could NOT find CURL`. The build finished (static `xrSimCore.lib` plus both executables). Both executables exited 0 and printed no `FAIL` lines. `xrSimAuthoritySpineTests` `main` runs 14 groups; `xrSimWorldStateTests` `main` runs 76 cases. Either binary returns 1 if any group fails. With curl absent, `IsAnthropicHttpTransportAvailable()` is false and the factory test expects `unavailable`. This rerun does not replace the macOS ASan/UBSan record for `04b4ef5b5`.
 
 Task 1 manifest/canonical state shipped at `04b4ef5b5`: 14 focused groups, 76 existing xrSim cases, 41 tooling tests, and C++17 no-exceptions ASan/UBSan passed; Opus independently rebuilt and approved the final snapshot. This is library-only verification, not live Gate 1 acceptance. Local audit evidence is retained under `artifacts/authority-recovery-2026-11-07/`.
 
@@ -97,6 +120,12 @@ Sonnet-only remains the authority-spine policy; `claude-sonnet-5` is a historica
 plan/source value requiring an official availability check before live use.
 No model or provider substitution is approved by this reconciliation, and no
 network/provider availability check was performed.
+
+## Metal M-R1 assessment — 2026-11-08
+
+`archive/feat/metal-mr1-ingame` (`caa2e4953`, one commit on M-R0 `1ed42b1f1`, 17 files, +146/−36) was assessed and left archived. `git merge-tree --name-only --merge-base=1ed42b1f1 HEAD caa2e4953` (HEAD was `dev` `437cca1aa`) exited 0 and produced tree `e5579d7dc1672c6907c7097fcf82fa552c84e110`. The diff of that tree against `HEAD` is the same 17 files as the original commit, so the patch still applies cleanly onto `dev` `437cca1aa`.
+
+It was not integrated. Six of the files are `res/gamedata/shaders/gl/*`, which the GL renderer loads. Those are not Metal-only paths and not the shared `xrRender` `USE_METAL` exception. The shader edits are `#ifdef SM_METAL` with the previous GL text in `#else`, and the shared C++ edits (`Blender_Recorder_StandartBinding.cpp`, `r2_R_render.cpp`, `r2_R_sun_support.h`) keep the existing DX11/GL branches, but the menu-quad change in `r2_R_render.cpp` depends on the `stub_notransform_t_menu.vs` `SM_METAL` negate. Taking the Metal-module files alone would split that pair. Native renderer work stays paused. Nothing was built: this machine has no macOS or Metal SDK, and `XRAY_METAL` stays OFF.
 
 ## Frame-time measurement and upstream intake
 
