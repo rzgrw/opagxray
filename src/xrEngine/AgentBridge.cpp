@@ -632,6 +632,4 @@ std::string CAgentBridge::VerbAgentPackSpawn(const std::string& payload, bool& o
     return "spawned " + registered + " ids=" + format_spawned_ids(ids);
 }
 
-#else // XR_PLATFORM_WINDOWS
-CAgentBridge* g_agent_bridge = nullptr;
-#endif
+#endif // XR_PLATFORM_WINDOWS
