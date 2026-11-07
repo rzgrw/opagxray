@@ -58,6 +58,7 @@ class ENGINE_API IGame_Level : public IInputReceiver,
                                public IEventReceiver
 {
     bool m_world_rendered;
+    const u64 m_lifetimeId;
 
 protected:
     // Network interface
@@ -97,6 +98,14 @@ public:
     // Main, global functions
     IGame_Level();
     virtual ~IGame_Level();
+
+    IGame_Level(const IGame_Level&) = delete;
+    IGame_Level& operator=(const IGame_Level&) = delete;
+    IGame_Level(IGame_Level&&) = delete;
+    IGame_Level& operator=(IGame_Level&&) = delete;
+
+    // Process-local identity only; never serialized or sent over the network.
+    [[nodiscard]] u64 LifetimeId() const { return m_lifetimeId; }
 
     virtual shared_str name() const = 0;
     virtual void GetLevelInfo(CServerInfo* si) = 0;

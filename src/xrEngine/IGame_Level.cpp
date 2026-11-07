@@ -10,11 +10,34 @@
 #include "xr_object.h"
 #include "Feel_Sound.h"
 
+#include <atomic>
+#include <cstdlib>
+#include <limits>
+
+namespace
+{
+std::atomic<u64> nextLevelLifetimeId{1};
+
+u64 AllocateLevelLifetimeId()
+{
+    u64 id = nextLevelLifetimeId.load(std::memory_order_relaxed);
+    for (;;)
+    {
+        // Saturate rather than wrap: reusing an identity could restore a dead
+        // level's subscriptions into a replacement. Exhaustion is unrecoverable.
+        if (id == std::numeric_limits<u64>::max())
+            std::abort();
+        if (nextLevelLifetimeId.compare_exchange_weak(id, id + 1, std::memory_order_relaxed))
+            return id;
+    }
+}
+} // namespace
+
 ENGINE_API IGame_Level* g_pGameLevel = NULL;
 extern bool g_bLoaded;
 
 IGame_Level::IGame_Level()
-    : ObjectSpace(&g_pGamePersistent->SpatialSpace)
+    : m_lifetimeId(AllocateLevelLifetimeId()), ObjectSpace(&g_pGamePersistent->SpatialSpace)
 {
     ZoneScoped;
 

@@ -42,6 +42,14 @@ public:
 
     void Clear() { messages.clear(); }
 
+    bool Contains(const T* object) const
+    {
+        for (const auto& message : messages)
+            if (message.Object == object && message.Prio != REG_PRIORITY_INVALID)
+                return true;
+        return false;
+    }
+
     constexpr void Add(T* object, const int priority = REG_PRIORITY_NORMAL)
     {
         Add({ object, priority });

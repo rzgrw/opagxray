@@ -51,6 +51,19 @@ class CMainMenu : public IMainMenu,
 {
     CUIDialogWnd* m_startDialog;
 
+    // Effects owned by the current activation, including a partially completed one.
+    struct ActivationEffects
+    {
+        u64 levelLifetimeId{}; // Compare only with the current live level; retain no pointer.
+        bool started{};
+        bool soundPaused{};
+        bool timerPaused{};
+        bool consoleHidden{};
+        bool levelFrameRemoved{};
+        bool levelRenderRemoved{};
+        bool menuRenderAdded{};
+    } m_activation;
+
     enum
     {
         flRestoreConsole = (1 << 0),
@@ -117,6 +130,8 @@ protected:
 
     xr_vector<CUIMessageBoxEx*> m_pMB_ErrDlgs;
     bool ReloadUI();
+    void UpdateUIRestart();
+    void DeactivateUI();
 
 public:
     u32 m_deactivated_frame;

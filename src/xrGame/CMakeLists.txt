@@ -2533,3 +2533,11 @@ if (BUILD_SHARED_LIBS)
         DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )
 endif()
+
+# Standalone regression for the same reload/restart implementation used by MainMenu.cpp.
+add_executable(xrMainMenuReloadTests EXCLUDE_FROM_ALL tests/MainMenuReloadTests.cpp)
+target_include_directories(xrMainMenuReloadTests PRIVATE "${PROJECT_SOURCE_DIR}/src")
+set_target_properties(xrMainMenuReloadTests PROPERTIES UNITY_BUILD OFF)
+if (NOT MSVC)
+    target_compile_options(xrMainMenuReloadTests PRIVATE -fno-exceptions)
+endif()
