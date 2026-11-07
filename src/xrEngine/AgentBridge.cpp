@@ -1,4 +1,7 @@
 #include "stdafx.h"
+#ifdef XRAY_OVERHEAD_PROBE
+#include "OverheadExperiment.h"
+#endif
 #include "AgentBridge.h"
 
 CAgentBridge* g_agent_bridge = nullptr;
@@ -243,6 +246,9 @@ void CAgentBridge::HandleRequest(const std::string& line)
         Respond(id, true, "");
         return; // socket thread notices the client closing
     }
+#ifdef XRAY_OVERHEAD_PROBE
+    else if (verb.rfind("overhead.", 0) == 0) result = xray::overhead::Control(verb, payload, ok);
+#endif
     else if (verb == "cmd")   result = VerbCmd(payload, ok);
     else if (verb == "lua")   result = VerbLua(payload, ok);
     else if (verb == "key")   result = VerbKey(payload, ok);
@@ -255,6 +261,9 @@ void CAgentBridge::HandleRequest(const std::string& line)
     else { ok = false; result = "unknown verb: " + verb; }
 
     Respond(id, ok, result);
+#ifdef XRAY_OVERHEAD_PROBE
+    if (ok && verb == "overhead.arm") xray::overhead::AwaitRunner();
+#endif
 }
 
 // ---- cmd ----

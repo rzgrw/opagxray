@@ -6,6 +6,9 @@
 // AlexMX - Alexander Maksimchuk
 //-----------------------------------------------------------------------------
 #include "stdafx.h"
+#ifdef XRAY_OVERHEAD_PROBE
+#include "OverheadExperiment.h"
+#endif
 
 #include "x_ray.h"
 
@@ -378,8 +381,15 @@ int CApplication::Run()
     HideSplash();
     Device.Run();
 
+#ifdef XRAY_OVERHEAD_PROBE
+    for (;;)
+    {
+        xray::overhead::Boundary();
+        if (SDL_QuitRequested()) break;
+#else
     while (!SDL_QuitRequested()) // SDL_PumpEvents is here
     {
+#endif
         FrameMarkStart(FRAME_MARK_APPLICATION_RUN);
         bool canCallActivate = false;
         bool shouldActivate = false;
