@@ -1,0 +1,122 @@
+{
+  "task_id": "task_d09e1ea88ffc",
+  "dispatch_id": "ctx_41f8bf6c9ea9",
+  "status": "repaired-and-verified-awaiting-independent-review",
+  "base_commit": "90c6e57e697ce4fa16c306ab9a09f298c825f342",
+  "source_sha256": {
+    "src/xrEngine/IGame_Level.h": "2abf2b31678da7905b2e8c418a7aedcb434352369db06b22a6a442ef35109ec3",
+    "src/xrEngine/IGame_Level.cpp": "af43a1b37deaef50169641ebe77dce341974b4519db22e28bfa043734fc28947",
+    "src/xrEngine/pure.h": "56df27a226dcae385b00a6405b968e1305336a6fc0f9e4b4a679737c977d406c",
+    "src/xrGame/MainMenu.cpp": "9f70f406805fc201a29c840432504db8a8dfd427baaa0552f147ac559129eb99",
+    "src/xrGame/MainMenu.h": "69c3076f33f8b0c410e7920591268482dbd70ca5b879c7c5fb039091e7dc70cc",
+    "src/xrGame/MainMenuReload.inl": "ca696342b9d47ba69823341c80b7800680c6fdfb70a4f3c8f5d4d7d9f08e35f1",
+    "src/xrGame/tests/MainMenuReloadTests.cpp": "491ea53570ad2e76b83d605fe093cd1a6feb2caacd311b6c39f281078493cb79",
+    "src/xrGame/CMakeLists.txt": "569c726ffdf52526a295446b78eb08fc38a21480cde47b6fb0b0f4dd4349eac0"
+  },
+  "binary_sha256": {
+    "artifacts/frame-time/task-d09e1ea88ffc/bin/xr_3da": "0c6c6d34568bc6a896e511f5a3dd2bf7a28253dcee1e7e0d8eef8e050d83a472",
+    "artifacts/frame-time/task-d09e1ea88ffc/bin/xrCore.dylib": "5fdf6faf6304f3688fe86d140daef3d53c068ba40f728149494f20dac41b54ac",
+    "artifacts/frame-time/task-d09e1ea88ffc/bin/xrEngine.dylib": "7122ff71a2a637013b047a8ed56b65178a381284d3f8bbdbcc5970a636a89601",
+    "artifacts/frame-time/task-d09e1ea88ffc/bin/xrGame.dylib": "86a64f9b1b7a0338fbcd25807609492cff433455eb6f447708be95b243111ac5",
+    "artifacts/frame-time/task-d09e1ea88ffc/bin/xrRender_GL.dylib": "b935e85b99c7f53986546373535d336e28d4f63b292f2b3b88819a497c1ac53a",
+    "artifacts/frame-time/task-d09e1ea88ffc/bin/xrMainMenuReloadTests": "1244bca3d9d2f8cd4f9a12eef5e795a0f2035c6a29b1a9c1aa14b50c9d37d285"
+  },
+  "test_binary_sha256": {
+    "final-green": "46d00decfda52cfbec1c92850c67e1902c56a882ecc928711719f1224d9b5ec6",
+    "lifetime-production-test": "62f97c4ef0c1b72e4a17a3fedc02c87aa34904e6fb8b07e521bef33f63560a7c"
+  },
+  "artifact_sha256": {
+    "review.md": "cf97bb2ab99f0ea2f1e3d77119d5b300c38a9d88064c19836119adce3c7c42fb",
+    "changes.patch": "95f93411c7e8d71efa42e259e89599c16b244ff689496d96aea15a7a2c5f197d",
+    "repair-from-reviewed.patch": "807276a2b5decc646f5870e65b9f22d8de43085d799afc15d49b01116a5e41ec",
+    "baseline-results.json": "96c8979f852212d0558967c72f6e1347412a3ab7b7ccda981f562c0d00011cdc",
+    "lifecycle-baseline-results.json": "02c7d9d08a6c594c09c0272140f9640ddb96a72d108c2eee1ca85137b104d933",
+    "pause-factory-red.json": "a55a2da88a8272bc2087768800164e4826a6aec16c5f445d846247f33f390657",
+    "lifetime-red.json": "40eb3b0379c24252450d57a23084a7d24f6398a2d58d5e70b723c0887bb11cc3",
+    "regression-results.json": "c2858c9eb9dccbeea011aa2e3727df33435d0762db1a5155d498a8f001d60ece",
+    "lifetime-results.json": "238fc013820ea9c0750bcf6be24b7cc87a94236de8b7ed764afa1a9b8af3f125",
+    "final-build-results.json": "f26267fc70d4cfb16d39ad4ae05df8e9dabb4721ab43672d6921a9b2e11af83d",
+    "build-results.json": "008acf3de6638d8e5d238d6130948c7d118d2b55d165ebe059fa878cc9fffc6b",
+    "final-checks.json": "ff0294e88d92d6296967383b9fa7f419c8adfdc2d5faae5e08417b498891fc21",
+    "compile-evidence.json": "169d7537faa9bc8de40242d549d2b9dfbb2a9f6a7a7f7341a25d21776dcdcbad",
+    "binary-linkage.json": "6d13362ade5b8b766d840d0ae6bc65a16f182e6ec74619b16188fc73bcef1fc9",
+    "build-final-gl.log": "51966fe0d12b11f011e17fdfa18486db21c989885d5d8e62f3959e6efd5cedea",
+    "run-final-cmake.log": "d36c9d47eefdd08999107d8167c52aa0e81fe02163deba45e6dededcc8da9b28",
+    "verify-build.py": "f29cee23a7ed05cb30fce43b8b31386dba127ca40aab64aa5c1375b859c470c5",
+    "verify-final-build.py": "94931980c9ccfd0e22b5c669b9d817b44c75dce2eeebffa47c71abcb0b504d51",
+    "verify-regressions.py": "6b9b6ed6258cddaefb60decad6878de15264b056102227e462691581bb804996",
+    "verify-lifetime.py": "0d391c6161b88cf7d2ff4203a1741e27ec47fb963d48721add7328b090a59c2b",
+    "lifetime-production-test.cpp": "bfb15f14ca400093b9f4c88e9f78ade766396cb36bd17198bb5c51aaeaf11ecc",
+    "copy-usage-search.txt": "51872b719a2da9eb377021a995ca71694b8421c79834e0521dc0b9df45c3261c"
+  },
+  "verification": {
+    "final_cmake_passed": 40,
+    "final_asan_ubsan_passed": 40,
+    "retained_prior_cases": 12,
+    "baseline_failed": 26,
+    "baseline_passed": 14,
+    "mutations_rejected": 7,
+    "literal_production_lifetime_constructor_allocator_passed": true,
+    "allocator_concurrent_unique_ids": 512,
+    "allocator_exhaustion_expected_exit": -6,
+    "complete_gl_target": "xr_3da",
+    "complete_gl_build_exit": 0,
+    "test_cpp_exceptions": false,
+    "XRAY_EXCEPTIONS": 0,
+    "configuration": "arm64 Release SDK15.4 deployment15.0 unityON MetalOFF VulkanOFF"
+  },
+  "build_commands": [
+    {
+      "name": "build-final-gl",
+      "command": [
+        "cmake",
+        "--build",
+        "/Users/rz/orca/opagxray/artifacts/frame-time/task-d09e1ea88ffc/build",
+        "--target",
+        "xr_3da",
+        "xrMainMenuReloadTests",
+        "-j10"
+      ],
+      "returncode": 0,
+      "started": 1794084857.741077,
+      "ended": 1794084910.0173361,
+      "log": "/Users/rz/orca/opagxray/artifacts/frame-time/task-d09e1ea88ffc/build-final-gl.log"
+    },
+    {
+      "name": "run-final-cmake",
+      "command": [
+        "/Users/rz/orca/opagxray/artifacts/frame-time/task-d09e1ea88ffc/bin/xrMainMenuReloadTests"
+      ],
+      "returncode": 0,
+      "started": 1794084910.0177338,
+      "ended": 1794084910.322998,
+      "log": "/Users/rz/orca/opagxray/artifacts/frame-time/task-d09e1ea88ffc/run-final-cmake.log"
+    }
+  ],
+  "scope_approval_messages": [
+    "msg_f786bb12d108",
+    "msg_bc6512d0f67b"
+  ],
+  "changes": [
+    "Tracks and reverses only activation effects reached before failure or close, preserving pre-existing pause and balanced audio",
+    "Runs common null-safe cleanup on factory/cast failure, bypassing public close guards, and suppresses failed restart notifications",
+    "Queries actual valid registry membership without allocation or mutation, preventing restoration of absent entries or duplicates",
+    "Uses a process-local non-reused lifetime ID obtained from current live level only, with no retained stale pointer and no copy/move identity duplication"
+  ],
+  "limitations": [
+    "No live game, Lua/ALife/intro, SDL input callbacks, real audio playback or initialized engine allocator were exercised",
+    "Production methods and registry/xr_delete are compiled literally, but external dependencies are fixtures; ID constructor harness likewise stubs engine resources",
+    "Original failed-cast dynamic-type cause and upstream release null-client factory dereference remain unexplained/out of scope",
+    "Existing global boolean timer pause policy remains; no new global ownership protocol",
+    "Class layouts changed: use the complete isolated binary set only after independent review and separately assigned exclusive runtime slot"
+  ],
+  "next_step": "Independent re-review of all eight source hashes and both patches; then a separately assigned private-runtime regression using one bridge connection, distinct send/ACK records, owned-PID timeout sample and actual normal-exit evidence.",
+  "runtime_launched": false,
+  "runtime_slot_used": false,
+  "runtime_modified": false,
+  "submodule_revisions_unchanged": true,
+  "submodule_worktrees_clean": true,
+  "prior_crash_binary_preserved": true,
+  "commit_push_provider_github_operations": false,
+  "review_path": "/Users/rz/orca/opagxray/artifacts/frame-time/task-d09e1ea88ffc/review.md"
+}

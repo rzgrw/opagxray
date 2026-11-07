@@ -1,0 +1,5 @@
+{
+  "tools/frame_time_provenance.py": "edb3c3171e78e7d37e0f285f1e68e92e9273d781c76fe13afeca84c13eb74373",
+  "tools/tests/test_frame_time_provenance.py": "4ea555ed772b3733c82bc2cca73370f4634437d7727e8d7b1fd36ac2988bbb70",
+  "docs/superpowers/specs/2026-11-07-frame-time-provenance-design.md": "cedc24fb4ff9068f52ad50a40873f19ef5b886aa85a5978675946f095ec64996"
+}

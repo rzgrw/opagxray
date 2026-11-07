@@ -1,0 +1,341 @@
+{
+  "task_id": "task_4fb44a3171e2",
+  "dispatch_id": "ctx_f4db1f17e875",
+  "status": "bounded-stability-verification-completed-runtime-slot-released",
+  "source_binary_hashes": {
+    "source_sha256": {
+      "src/xrEngine/IGame_Level.h": "2abf2b31678da7905b2e8c418a7aedcb434352369db06b22a6a442ef35109ec3",
+      "src/xrEngine/IGame_Level.cpp": "af43a1b37deaef50169641ebe77dce341974b4519db22e28bfa043734fc28947",
+      "src/xrEngine/pure.h": "56df27a226dcae385b00a6405b968e1305336a6fc0f9e4b4a679737c977d406c",
+      "src/xrGame/MainMenu.cpp": "9f70f406805fc201a29c840432504db8a8dfd427baaa0552f147ac559129eb99",
+      "src/xrGame/MainMenu.h": "69c3076f33f8b0c410e7920591268482dbd70ca5b879c7c5fb039091e7dc70cc",
+      "src/xrGame/MainMenuReload.inl": "ca696342b9d47ba69823341c80b7800680c6fdfb70a4f3c8f5d4d7d9f08e35f1",
+      "src/xrGame/tests/MainMenuReloadTests.cpp": "491ea53570ad2e76b83d605fe093cd1a6feb2caacd311b6c39f281078493cb79",
+      "src/xrGame/CMakeLists.txt": "569c726ffdf52526a295446b78eb08fc38a21480cde47b6fb0b0f4dd4349eac0"
+    },
+    "binary_sha256": {
+      "artifacts/frame-time/task-d09e1ea88ffc/bin/xr_3da": "0c6c6d34568bc6a896e511f5a3dd2bf7a28253dcee1e7e0d8eef8e050d83a472",
+      "artifacts/frame-time/task-d09e1ea88ffc/bin/xrCore.dylib": "5fdf6faf6304f3688fe86d140daef3d53c068ba40f728149494f20dac41b54ac",
+      "artifacts/frame-time/task-d09e1ea88ffc/bin/xrEngine.dylib": "7122ff71a2a637013b047a8ed56b65178a381284d3f8bbdbcc5970a636a89601",
+      "artifacts/frame-time/task-d09e1ea88ffc/bin/xrGame.dylib": "86a64f9b1b7a0338fbcd25807609492cff433455eb6f447708be95b243111ac5",
+      "artifacts/frame-time/task-d09e1ea88ffc/bin/xrRender_GL.dylib": "b935e85b99c7f53986546373535d336e28d4f63b292f2b3b88819a497c1ac53a",
+      "artifacts/frame-time/task-d09e1ea88ffc/bin/xrMainMenuReloadTests": "1244bca3d9d2f8cd4f9a12eef5e795a0f2035c6a29b1a9c1aa14b50c9d37d285"
+    }
+  },
+  "source_binaries_unchanged": true,
+  "review_path": "/Users/rz/orca/opagxray/artifacts/frame-time/task-1890b468aa80/reload-rereview.md",
+  "review_sha256": "fe8227eedc077f89e26a6b08b18b0588b2476f16305f104e72dc49ce2b4bd866",
+  "staging": [
+    {
+      "attempt": "early",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
+        "/Users/rz/orca/opagxray/tools/stage_coc_runtime.py",
+        "--base",
+        "/Users/rz/orca/ixray-1.6-stcop/build/runtime/coc-base/S.T.A.L.K.E.R. - Call of Chernobyl",
+        "--patch",
+        "/Users/rz/Downloads/S.T.A.L.K.E.R. - Call of Chernobyl 2",
+        "--output",
+        "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-early"
+      ],
+      "returncode": 0,
+      "started": 1794085895.6806688,
+      "ended": 1794085916.724778,
+      "runtime": "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-early",
+      "save_hashes": {
+        "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-early/appdata/savedgames/ft_b0c5_verified.scoc": "da3c3a7c2f7387c9721517bfc778936b3ac88ced5f760aae18cdcf47924997c2",
+        "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-early/appdata/savedgames/ft_b0c5_verified.scop": "833a5e9a33def823bfceeaefa7dea4e6f3536cd6194795b0a73e3a0fd8e7ff50"
+      },
+      "config_sha256": "93763da97adb00f6a6eb6a16945d166f88467c436f59609d341d25a26ffe183c",
+      "manifest_sha256": "6516128256e5553d0d6071110fdcad4763d4e77fdbab276b1fbf3a582a228d0e"
+    },
+    {
+      "attempt": "settled",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
+        "/Users/rz/orca/opagxray/tools/stage_coc_runtime.py",
+        "--base",
+        "/Users/rz/orca/ixray-1.6-stcop/build/runtime/coc-base/S.T.A.L.K.E.R. - Call of Chernobyl",
+        "--patch",
+        "/Users/rz/Downloads/S.T.A.L.K.E.R. - Call of Chernobyl 2",
+        "--output",
+        "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-settled"
+      ],
+      "returncode": 0,
+      "started": 1794085916.725009,
+      "ended": 1794085970.229012,
+      "runtime": "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-settled",
+      "save_hashes": {
+        "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-settled/appdata/savedgames/ft_b0c5_verified.scoc": "da3c3a7c2f7387c9721517bfc778936b3ac88ced5f760aae18cdcf47924997c2",
+        "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-settled/appdata/savedgames/ft_b0c5_verified.scop": "833a5e9a33def823bfceeaefa7dea4e6f3536cd6194795b0a73e3a0fd8e7ff50"
+      },
+      "config_sha256": "93763da97adb00f6a6eb6a16945d166f88467c436f59609d341d25a26ffe183c",
+      "manifest_sha256": "6516128256e5553d0d6071110fdcad4763d4e77fdbab276b1fbf3a582a228d0e"
+    }
+  ],
+  "attempts": [
+    {
+      "mode": "early",
+      "process": {
+        "pid": 16347,
+        "argv": [
+          "/Users/rz/orca/opagxray/artifacts/frame-time/task-d09e1ea88ffc/bin/xr_3da",
+          "-agent_bridge",
+          "/private/tmp/xr-4fb4-uxn0tv8k/b.sock"
+        ],
+        "cwd": "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-early",
+        "started": 1794086022.337985,
+        "socket": "/private/tmp/xr-4fb4-uxn0tv8k/b.sock",
+        "driver_pid": 16343,
+        "deadline_seconds": 420,
+        "exited": 1794086105.8900568,
+        "returncode": 0
+      },
+      "elapsed_seconds": 83.55207180976868,
+      "connection_count": 1,
+      "requests": 32,
+      "acknowledged": 32,
+      "initial_load_command": "start server(ft_b0c5_verified/single/alife/load) client(localhost)",
+      "states": [
+        {
+          "rid": 4,
+          "t": 1794086032.308043,
+          "state": "scene=game fps=49 frame=5 paused=1 loadscr=0 precache=0 actor=nil"
+        },
+        {
+          "rid": 5,
+          "t": 1794086037.3234181,
+          "state": "scene=game fps=10 frame=37 paused=0 loadscr=1 precache=57 level=l01_escape pos=-207.7,-22.1,-127.3 hp=1.00 time=2790969660"
+        },
+        {
+          "rid": 7,
+          "t": 1794086046.343531,
+          "state": "scene=game fps=63 frame=436 paused=0 loadscr=0 precache=0 level=l01_escape pos=-207.7,-22.1,-127.3 hp=1.00 time=2791014940"
+        },
+        {
+          "rid": 10,
+          "t": 1794086054.528325,
+          "state": "scene=game fps=61 frame=927 paused=0 loadscr=0 precache=0 level=l01_escape pos=-206.0,-22.5,-128.4 hp=1.00 time=2791096780"
+        },
+        {
+          "rid": 14,
+          "t": 1794086069.853573,
+          "state": "scene=game fps=60 frame=1846 paused=0 loadscr=0 precache=0 level=l01_escape pos=-206.0,-22.5,-128.4 hp=1.00 time=2791250120"
+        },
+        {
+          "rid": 17,
+          "t": 1794086076.406646,
+          "state": "scene=game fps=0 frame=2230 paused=1 loadscr=0 precache=0 level=l01_escape pos=-206.0,-22.5,-128.4 hp=1.00 time=2791309150"
+        },
+        {
+          "rid": 20,
+          "t": 1794086084.194829,
+          "state": "scene=game fps=61 frame=2617 paused=0 loadscr=0 precache=0 level=l01_escape pos=-206.0,-22.5,-128.4 hp=1.00 time=2791310410"
+        },
+        {
+          "rid": 23,
+          "t": 1794086085.836247,
+          "state": "scene=game fps=60 frame=2692 paused=0 loadscr=0 precache=0 actor=nil"
+        },
+        {
+          "rid": 24,
+          "t": 1794086090.444732,
+          "state": "scene=game fps=0 frame=2835 paused=1 loadscr=1 precache=0 level=l01_escape pos=-206.0,-22.5,-128.4 hp=1.00 time=2791351430"
+        },
+        {
+          "rid": 27,
+          "t": 1794086103.378164,
+          "state": "scene=game fps=60 frame=3374 paused=0 loadscr=0 precache=0 level=l01_escape pos=-206.0,-22.5,-128.4 hp=1.00 time=2791357460"
+        },
+        {
+          "rid": 30,
+          "t": 1794086104.3854809,
+          "state": "scene=game fps=59 frame=3435 paused=0 loadscr=0 precache=0 level=l01_escape pos=-207.3,-22.1,-127.7 hp=1.00 time=2791367630"
+        }
+      ],
+      "guard_count": 1,
+      "fatal_scan_hits": 0,
+      "quit_send": {
+        "t": 1794086104.827093,
+        "event": "send_begin",
+        "rid": 32,
+        "verb": "cmd",
+        "payload": "quit"
+      },
+      "quit_ack": {
+        "t": 1794086104.848017,
+        "event": "ack",
+        "rid": "32",
+        "status": "ok",
+        "response": ""
+      },
+      "quit_ack_to_exit_seconds": 1.0420398712158203,
+      "screenshots": {
+        "4fb4-early-inventory.jpg": "c0b9e1f0f53bd56d036bcaeee69827c922b58367a6839dc9dc2c60cf417aa1fb",
+        "4fb4-early-loading.jpg": "a3b8fa3c028a9d72ccb64ada308286bccdb4f226828f51aaa8eff251a2971bda",
+        "4fb4-early-menu.jpg": "e0bd1f6306378112e2fc6c2ec4ce4b6ed60744b26a254aed6ff71b9b666a552f",
+        "4fb4-early-moved.jpg": "523d41728b29f2ed5f72e8744f8a721a08d8e474a1f683459c809e93eaf81321",
+        "4fb4-early-open-menu.jpg": "b4740568f938506725b5e4e60f2b2eecdf00a530a3559a9dfdb5eb675645a9c8",
+        "4fb4-early-ready-after-reload.jpg": "b632dc6e5524060490b2f3b8ca3003a7e61667d962391a9f0149e8033df6c6a4",
+        "4fb4-early-reloaded.jpg": "1659ebd8c0b7650b93521eac20bca37fa834d2a6768bdd11d2862be6a43511a9"
+      },
+      "final_config_sha256": "a8e61a03f4995204e3c62d2bc687bf7ef5aa46ee3298e04159371526b65a8924",
+      "final_private_file_hashes": {
+        "appdata/savedgames/ft_4fb4_early.scoc": "3db2bfd961919939694c03be92c67c0fd7c5246a6995ad432713bd910f72d48f",
+        "appdata/savedgames/ft_4fb4_early.scop": "4dd9eb0e17cddb7e1e977f16a8097ab5460c8542e9bdb015d69a542235cb8652",
+        "appdata/savedgames/ft_b0c5_verified.scoc": "da3c3a7c2f7387c9721517bfc778936b3ac88ced5f760aae18cdcf47924997c2",
+        "appdata/savedgames/ft_b0c5_verified.scop": "833a5e9a33def823bfceeaefa7dea4e6f3536cd6194795b0a73e3a0fd8e7ff50",
+        "gamedata/configs/atmosfear_options.ltx": "bd3dd2f393d8c77c395dff586b7f187b6e0463eef7a41e6f5a10477f4765d855",
+        "gamedata/configs/axr_options.ltx": "26a4fd3df425799110eaa56ada21ba0fc95f69f44a33b81fb3daad773c946ce9"
+      },
+      "termination_signals_sent": false,
+      "crash": false
+    },
+    {
+      "mode": "settled",
+      "process": {
+        "pid": 16783,
+        "argv": [
+          "/Users/rz/orca/opagxray/artifacts/frame-time/task-d09e1ea88ffc/bin/xr_3da",
+          "-agent_bridge",
+          "/private/tmp/xr-4fb4-dcr10v_r/b.sock"
+        ],
+        "cwd": "/Users/rz/orca/opagxray/build/runtime/reload-4fb4-settled",
+        "started": 1794086115.748267,
+        "socket": "/private/tmp/xr-4fb4-dcr10v_r/b.sock",
+        "driver_pid": 16781,
+        "deadline_seconds": 420,
+        "exited": 1794086210.52101,
+        "returncode": 0
+      },
+      "elapsed_seconds": 94.77274298667908,
+      "connection_count": 1,
+      "requests": 36,
+      "acknowledged": 36,
+      "initial_load_command": "start server(ft_b0c5_verified/single/alife/load) client(localhost)",
+      "states": [
+        {
+          "rid": 1,
+          "t": 1794086128.915819,
+          "state": "scene=menu fps=57 frame=708 paused=0 loadscr=0 precache=0"
+        },
+        {
+          "rid": 2,
+          "t": 1794086132.071876,
+          "state": "scene=menu fps=57 frame=894 paused=0 loadscr=0 precache=0"
+        },
+        {
+          "rid": 4,
+          "t": 1794086134.40514,
+          "state": "scene=menu fps=60 frame=1031 paused=0 loadscr=0 precache=0"
+        },
+        {
+          "rid": 7,
+          "t": 1794086145.935807,
+          "state": "scene=game fps=60 frame=1673 paused=0 loadscr=0 precache=0 actor=nil"
+        },
+        {
+          "rid": 8,
+          "t": 1794086151.1146839,
+          "state": "scene=game fps=10 frame=1705 paused=0 loadscr=1 precache=57 level=l01_escape pos=-207.7,-22.1,-127.3 hp=1.00 time=2790970150"
+        },
+        {
+          "rid": 10,
+          "t": 1794086155.96734,
+          "state": "scene=game fps=0 frame=1906 paused=1 loadscr=1 precache=0 level=l01_escape pos=-207.7,-22.1,-127.3 hp=1.00 time=2790999330"
+        },
+        {
+          "rid": 13,
+          "t": 1794086170.9643252,
+          "state": "scene=game fps=58 frame=2585 paused=0 loadscr=0 precache=0 level=l01_escape pos=-204.2,-22.3,-128.2 hp=1.00 time=2791039090"
+        },
+        {
+          "rid": 16,
+          "t": 1794086172.277686,
+          "state": "scene=game fps=60 frame=2663 paused=0 loadscr=0 precache=0 level=l01_escape pos=-202.5,-21.8,-130.6 hp=1.00 time=2791052090"
+        },
+        {
+          "rid": 22,
+          "t": 1794086191.093945,
+          "state": "scene=game fps=0 frame=3780 paused=1 loadscr=0 precache=0 level=l01_escape pos=-202.1,-21.9,-130.4 hp=1.00 time=2791233790"
+        },
+        {
+          "rid": 25,
+          "t": 1794086191.681678,
+          "state": "scene=game fps=60 frame=3812 paused=0 loadscr=0 precache=0 level=l01_escape pos=-202.1,-21.9,-130.4 hp=1.00 time=2791235130"
+        },
+        {
+          "rid": 28,
+          "t": 1794086199.538893,
+          "state": "scene=game fps=0 frame=4089 paused=1 loadscr=1 precache=0 level=l01_escape pos=-202.1,-21.9,-130.4 hp=1.00 time=2791277310"
+        },
+        {
+          "rid": 31,
+          "t": 1794086208.489228,
+          "state": "scene=game fps=60 frame=4472 paused=0 loadscr=0 precache=0 level=l01_escape pos=-202.1,-21.9,-130.4 hp=1.00 time=2791282290"
+        },
+        {
+          "rid": 34,
+          "t": 1794086209.284247,
+          "state": "scene=game fps=60 frame=4520 paused=0 loadscr=0 precache=0 level=l01_escape pos=-202.2,-22.4,-129.1 hp=1.00 time=2791290290"
+        }
+      ],
+      "guard_count": 0,
+      "fatal_scan_hits": 0,
+      "quit_send": {
+        "t": 1794086209.513794,
+        "event": "send_begin",
+        "rid": 36,
+        "verb": "cmd",
+        "payload": "quit"
+      },
+      "quit_ack": {
+        "t": 1794086209.534917,
+        "event": "ack",
+        "rid": "36",
+        "status": "ok",
+        "response": ""
+      },
+      "quit_ack_to_exit_seconds": 0.9860928058624268,
+      "screenshots": {
+        "4fb4-settled-after-load.jpg": "cb148d116200a719da4c1da971c116a04e59ae4db5919e30ac08929650d06c95",
+        "4fb4-settled-inventory.jpg": "8ad54182b4ecb3e16c988d69385a6067a6372a3d8d0763f230f988ad2c38e6f0",
+        "4fb4-settled-load-prompt.jpg": "9bef72d871dc1cbf0dd4685a878aafb6d310822bf5ff4c78e6e7dfd74e1c0943",
+        "4fb4-settled-menu-before-load.jpg": "d6ad55e6ebd46eb01a5301e9e7430403a051e25c1e47d694c76605d68258a41d",
+        "4fb4-settled-moved.jpg": "537d8cee1416d79c05d22167810917a171959e365dd9f7c628abd678dd9aaa38",
+        "4fb4-settled-open-menu.jpg": "f006b3676071baece5f15966d2d99d0f60530e588592045398d7f66fc981291f",
+        "4fb4-settled-private-reload-prompt.jpg": "5183dbe83dcdea088462013c33ab42c310636d0a0b7fea0c85e06564d86dabe8",
+        "4fb4-settled-ready-after-reload.jpg": "17b9027a9e266d374ae713fda694ec10662e0b7f9737fb6c4ad0d61a679694e0"
+      },
+      "final_config_sha256": "48edc5658d9556c00d68b2262846711baf63f547a1720e42e0a298cc3398748a",
+      "final_private_file_hashes": {
+        "appdata/savedgames/ft_4fb4_settled.scoc": "4ffab1d28914e4954c2851c449bd5c421322f35d9ce86396328a82c6a8d06b2e",
+        "appdata/savedgames/ft_4fb4_settled.scop": "f022f9deab1dcd7e34dbae39b1d970a97e68b4aaf9e43a7acf060d35e67de695",
+        "appdata/savedgames/ft_b0c5_verified.scoc": "da3c3a7c2f7387c9721517bfc778936b3ac88ced5f760aae18cdcf47924997c2",
+        "appdata/savedgames/ft_b0c5_verified.scop": "833a5e9a33def823bfceeaefa7dea4e6f3536cd6194795b0a73e3a0fd8e7ff50",
+        "gamedata/configs/atmosfear_options.ltx": "748f00d5e10dfe06526cba2441f651b17b96112d5c27af928ad515af08f0c66f",
+        "gamedata/configs/axr_options.ltx": "26a4fd3df425799110eaa56ada21ba0fc95f69f44a33b81fb3daad773c946ce9"
+      },
+      "termination_signals_sent": false,
+      "crash": false
+    }
+  ],
+  "failed_attempts": [],
+  "runtime_slot_released": true,
+  "no_live_game_process": true,
+  "implementation_edits": false,
+  "builds_during_task": 0,
+  "provider_calls": false,
+  "performance_claim": false,
+  "provenance_acceptance": false,
+  "audio_success_claim": false,
+  "normal_quit_both": true,
+  "limitations": [
+    "Early screenshot is black: menu-on ACK is not visible-menu proof; early rejection log does not distinguish null factory return from failed cast",
+    "Original dynamic type and underlying early lifecycle cause remain unknown despite value-error recovery",
+    "No audible playback validation; stager defaults mute effects/music while sound subsystem is initialized",
+    "Low gamesave-screenshot registration edge from re-review is not exercised/fixed; no multiplayer or missing-membership fault path forced",
+    "No long soak, performance/overhead campaign, provenance seal/attest or Windows build/runtime validation"
+  ],
+  "windows_wrapup": "/Users/rz/orca/opagxray/artifacts/frame-time/windows-runtime-wrapup.md"
+}
