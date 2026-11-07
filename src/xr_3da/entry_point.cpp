@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include <array>
 #include <span>
 
 #include "xrEngine/x_ray.h"
