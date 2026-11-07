@@ -128,6 +128,19 @@ void CFrameTimeSession::BeginLoop(uint32_t engineFrame)
     m_running.store(state != FrameTimeState::Stopped && state != FrameTimeState::Disabled, std::memory_order_relaxed);
     m_recordScopes = Running() && !m_generationExhausted && state == FrameTimeState::Capturing;
 }
+#ifdef XRAY_OVERHEAD_PROBE
+bool CFrameTimeSession::ExperimentalCloseAt(uint64_t closingStamp)
+{
+    if (!Running() || std::this_thread::get_id() != m_owner) return false;
+    const auto close = m_collector.BeginLoopAt(closingStamp);
+    const auto stop = m_collector.Stop();
+    const auto finish = m_collector.BeginLoopAt(closingStamp);
+    AdvanceGeneration();
+    m_recordScopes = false;
+    m_running.store(false, std::memory_order_relaxed);
+    return close == FrameTimeResult::Ok && stop == FrameTimeResult::Ok && finish == FrameTimeResult::Ok;
+}
+#endif
 void CFrameTimeSession::EndLoop(uint32_t engineFrame)
 {
     if (Running()) m_collector.SetEngineFrameRange(m_frameBegin,engineFrame);

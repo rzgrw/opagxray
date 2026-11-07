@@ -6,6 +6,9 @@
 // AlexMX - Alexander Maksimchuk
 //-----------------------------------------------------------------------------
 #include "stdafx.h"
+#ifdef XRAY_OVERHEAD_PROBE
+#include "OverheadExperiment.h"
+#endif
 
 #include "x_ray.h"
 
@@ -380,6 +383,9 @@ int CApplication::Run()
 
     for (;;)
     {
+#ifdef XRAY_OVERHEAD_PROBE
+        xray::overhead::Boundary();
+#endif
         Device.FrameTime.BeginLoop(Device.dwFrame); // before SDL_PumpEvents and all window work
         if (SDL_QuitRequested())
             break;

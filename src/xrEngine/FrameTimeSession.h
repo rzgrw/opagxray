@@ -33,6 +33,9 @@ public:
     ~CFrameTimeSession();
     void BeginLoop(uint32_t engineFrame);
     void EndLoop(uint32_t engineFrame);
+#ifdef XRAY_OVERHEAD_PROBE
+    bool ExperimentalCloseAt(uint64_t closingStamp);
+#endif
     void Mark(FrameTimeLoopFlags flags) { if (Running()) m_collector.Mark(flags); }
     bool Running() const { return m_running.load(std::memory_order_relaxed); }
     const CFrameTimeCollector& Collector() const { return m_collector; }

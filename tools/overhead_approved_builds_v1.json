@@ -1,0 +1,414 @@
+{
+  "format": "openxviberay-overhead-approved-builds-v1",
+  "task": "task_5feca4024e59",
+  "arms": {
+    "base": {
+      "source": "/Users/rz/orca/workspaces/opagxray/frame-overhead-base",
+      "head": "e3f273f04bf85b4b265004cbbc8a35f19796cd31",
+      "source_identity": {
+        "ROLE": "base",
+        "REVISION": "e3f273f04bf85b4b265004cbbc8a35f19796cd31",
+        "CORE": "4ff8d18a809c884866d991c3b2a161e87da826d381de910e28b794216623fc8a",
+        "CALLSITE": "678e168be22319f0f42e20a5e561ceeaa05db29910b0172b8907346c8965be9c",
+        "SOURCE": "712c21360bd52c209451e277d5e936bbe2808a092c7a6b10cdce4494573d9adb"
+      },
+      "identity_json": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/build-base/src/xrEngine/overhead/source-identity.json",
+      "binary_dir": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base",
+      "binaries": {
+        "xrAICore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrAICore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrAICore.dylib",
+          "sha256": "0b103e9ece7600f789c19cf5bb9a6cb2f26a2adaa2503537555bb69cf0b1a37a",
+          "size": 469216
+        },
+        "xrAPI.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrAPI.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrAPI.dylib",
+          "sha256": "e1ab368d001b68829f90264ffb1df0a780a804132b1db5dbfb564a02b7a55765",
+          "size": 16776
+        },
+        "xrCDB.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrCDB.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrCDB.dylib",
+          "sha256": "1135ccc069e7abbb38ab3013f0f0e3d8b9acb370686931f117e346d20e4fbd53",
+          "size": 225512
+        },
+        "xrCore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrCore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrCore.dylib",
+          "sha256": "6546def91fee52e614d12b00143a525f82f4595641948a1321d013fd5990f9ae",
+          "size": 579696
+        },
+        "xrEngine.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrEngine.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrEngine.dylib",
+          "sha256": "f68e44b42fe73bde9087df7bc4de51168b1f04cbe2f89e80bb53f08cb41cc37b",
+          "size": 2934672
+        },
+        "xrGame.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrGame.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrGame.dylib",
+          "sha256": "a3e3092c1838fd1d87593956da5c3d313e3af4d757031077fbe6c0988a2f4271",
+          "size": 35553168
+        },
+        "xrGameSpy.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrGameSpy.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrGameSpy.dylib",
+          "sha256": "324d7fae00ec89d54a09704385e869b83518bbf244c18f11698ddf36be398c4d",
+          "size": 646864
+        },
+        "xrLuaJIT.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrLuaJIT.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrLuaJIT.dylib",
+          "sha256": "972f7aa1f2d75c281df0cbc0e8a1e4a860ad682651711faf15c66bd64870d1b2",
+          "size": 712432
+        },
+        "xrLuabind.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrLuabind.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrLuabind.dylib",
+          "sha256": "9f8fc3d3adce9a17ef6567e33c7cce6e27e088981bf644b77fd237f37d59c048",
+          "size": 170032
+        },
+        "xrMaterialSystem.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrMaterialSystem.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrMaterialSystem.dylib",
+          "sha256": "984ddb09b2fd5f0ca32cc311f117b7e0051bf36f041ae0a31905e833323661a1",
+          "size": 92520
+        },
+        "xrNetServer.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrNetServer.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrNetServer.dylib",
+          "sha256": "3a4161165ad9a1683c4b427f77db5f331c2c4b720e68c3bbd012014128b30a98",
+          "size": 129200
+        },
+        "xrODE.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrODE.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrODE.dylib",
+          "sha256": "d5ac9296a09918444bce5d0eb9fb8ddd211f1bd3ce282adb59ca646915da0cd7",
+          "size": 328376
+        },
+        "xrOPCODE.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrOPCODE.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrOPCODE.dylib",
+          "sha256": "405aa942c14d59f5d94335dfd25e48fa503afe153af6b105866965737a10aa26",
+          "size": 170064
+        },
+        "xrParticles.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrParticles.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrParticles.dylib",
+          "sha256": "193b1c1a12fcdbdbe88aea6f55a1ff280d7ca3d27f2899b0a4931ca2b3e8082e",
+          "size": 173136
+        },
+        "xrPhysics.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrPhysics.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrPhysics.dylib",
+          "sha256": "1c3a6a3056b68c8fd9cfcec89c83aeb280739f93121e823dcd0129ad4e50341b",
+          "size": 938960
+        },
+        "xrRender_GL.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrRender_GL.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrRender_GL.dylib",
+          "sha256": "a1e31529be2ebbb453260b234b7cff5d61fd522a19483ad7016b6fde70e68bd1",
+          "size": 4700048
+        },
+        "xrScriptEngine.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrScriptEngine.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrScriptEngine.dylib",
+          "sha256": "c3642c136a9a5f633595079d57ec7f62e7c8b667029e21c8b63cc4a84a8a9605",
+          "size": 431032
+        },
+        "xrSound.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrSound.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrSound.dylib",
+          "sha256": "5f61113a661b402241ad513b80055c675f77d3f166357ca78bde7b47418beb66",
+          "size": 178240
+        },
+        "xrUICore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrUICore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xrUICore.dylib",
+          "sha256": "abdd23ef1e5b0dbc07a7aedffdd9ac6a3341b7b39257ab7304afce0d4ce88463",
+          "size": 1942448
+        },
+        "xr_3da": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xr_3da",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-base/xr_3da",
+          "sha256": "d0bf129891f2b8017876cbca4eb477b131c30d1a534a1243fc05f10079786074",
+          "size": 35496
+        }
+      },
+      "identity_sha256": "93826336f2bcbe6a66629cd9dd819b1956bfe73c4fac620786ebff55225f0ce4"
+    },
+    "off": {
+      "source": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference",
+      "head": "45680801007e8c5a3fab7555eb4e4ed17a35ffe3",
+      "source_identity": {
+        "ROLE": "off",
+        "REVISION": "45680801007e8c5a3fab7555eb4e4ed17a35ffe3",
+        "CORE": "4ff8d18a809c884866d991c3b2a161e87da826d381de910e28b794216623fc8a",
+        "CALLSITE": "847f1be2658a4c522a5127766b5b72b468ca20343c0f956e1e6b5b59e69d90f7",
+        "SOURCE": "e1e14726380a3fa0bd1e710d41e2175f097f8e0d1aab82aaf7455c903d03b198"
+      },
+      "identity_json": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/build-off/src/xrEngine/overhead/source-identity.json",
+      "binary_dir": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off",
+      "binaries": {
+        "xrAICore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrAICore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrAICore.dylib",
+          "sha256": "9b5a5ee593786477f33327e09e3a2f3c12943ddcc9def913b7e63b4ca131f8bf",
+          "size": 469216
+        },
+        "xrAPI.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrAPI.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrAPI.dylib",
+          "sha256": "e1ab368d001b68829f90264ffb1df0a780a804132b1db5dbfb564a02b7a55765",
+          "size": 16776
+        },
+        "xrCDB.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrCDB.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrCDB.dylib",
+          "sha256": "f4c1c37ecc6239ebbf92622e4fb8e2a011733b568ef57a9d2c9696c4c2a03b80",
+          "size": 225512
+        },
+        "xrCore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrCore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrCore.dylib",
+          "sha256": "a63c1cfbacc418c819b17828ff19e9b3376b2e39da6cf74f208ebd8c08b327fd",
+          "size": 579696
+        },
+        "xrEngine.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrEngine.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrEngine.dylib",
+          "sha256": "27c38db328f4e47c9dcdd8bed436ce8dffbe16adc75eac59b30592a2d7894439",
+          "size": 2974928
+        },
+        "xrGame.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrGame.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrGame.dylib",
+          "sha256": "c6aa335838bdb89ff20ad6fae4706aa9e7822a0144c3ca05a793b51864e880f3",
+          "size": 35553168
+        },
+        "xrGameSpy.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrGameSpy.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrGameSpy.dylib",
+          "sha256": "f87a9a1b7f17b3429d444c3d24be0e632254f9166cbabf2773297337ea9c4f75",
+          "size": 646864
+        },
+        "xrLuaJIT.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrLuaJIT.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrLuaJIT.dylib",
+          "sha256": "972f7aa1f2d75c281df0cbc0e8a1e4a860ad682651711faf15c66bd64870d1b2",
+          "size": 712432
+        },
+        "xrLuabind.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrLuabind.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrLuabind.dylib",
+          "sha256": "068e80011b6bcad0364e433128ebb6a58bfb5fd0dab3603f419da20f2625d1fc",
+          "size": 170032
+        },
+        "xrMaterialSystem.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrMaterialSystem.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrMaterialSystem.dylib",
+          "sha256": "f1d79f21b0b86a0454f44593950cc63e6e8ba5cabe267d0fec0434e24e5551af",
+          "size": 92520
+        },
+        "xrNetServer.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrNetServer.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrNetServer.dylib",
+          "sha256": "25e76df91b3f95e482f7c34e92cda825ff88b98f1ad98322138efe99d34baa9b",
+          "size": 129200
+        },
+        "xrODE.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrODE.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrODE.dylib",
+          "sha256": "d5ac9296a09918444bce5d0eb9fb8ddd211f1bd3ce282adb59ca646915da0cd7",
+          "size": 328376
+        },
+        "xrOPCODE.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrOPCODE.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrOPCODE.dylib",
+          "sha256": "7142e5051637544c649d9c96bd4db1c4719c6f225af461cfdfcf5cf508bf719c",
+          "size": 170064
+        },
+        "xrParticles.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrParticles.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrParticles.dylib",
+          "sha256": "94b2042c2256cec50d9350fb63f42fe4b906fe8f366dd3986d3862e8f04c994c",
+          "size": 173136
+        },
+        "xrPhysics.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrPhysics.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrPhysics.dylib",
+          "sha256": "e6c1bbdbed6c668ea995fb2364084e676937aac110c9f82790cba6c706c2a457",
+          "size": 938960
+        },
+        "xrRender_GL.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrRender_GL.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrRender_GL.dylib",
+          "sha256": "3b8f64e5fe596a85d89d3c563241d4407c7c3d415f5d55114b382bc3e8ef7596",
+          "size": 4701104
+        },
+        "xrScriptEngine.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrScriptEngine.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrScriptEngine.dylib",
+          "sha256": "d2d36fb93ea34b0e9b925f2b7f3cf59e2ca919e2fff02efe90e98bb33ac52544",
+          "size": 431032
+        },
+        "xrSound.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrSound.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrSound.dylib",
+          "sha256": "1c9a8d41bbec0fb065baafd59bbf23b3c84ea4aee03b8ee23dea2416f27b9e29",
+          "size": 178240
+        },
+        "xrUICore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrUICore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xrUICore.dylib",
+          "sha256": "b0fdccc7bdca4e6432b216b69a682bf18e4524b2b021192848e74a79d5d56901",
+          "size": 1942448
+        },
+        "xr_3da": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xr_3da",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-off/xr_3da",
+          "sha256": "3dfa7f90dc4644e4c9f9f6fed71a39c32f9dbdc2612fc0df650f396bb1237ba9",
+          "size": 35496
+        }
+      },
+      "identity_sha256": "4b657bf22a41eb336468ed3809793b68ee83255860ba4583b44cb4eb7378df0b"
+    },
+    "on": {
+      "source": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference",
+      "head": "45680801007e8c5a3fab7555eb4e4ed17a35ffe3",
+      "source_identity": {
+        "ROLE": "on",
+        "REVISION": "45680801007e8c5a3fab7555eb4e4ed17a35ffe3",
+        "CORE": "4ff8d18a809c884866d991c3b2a161e87da826d381de910e28b794216623fc8a",
+        "CALLSITE": "847f1be2658a4c522a5127766b5b72b468ca20343c0f956e1e6b5b59e69d90f7",
+        "SOURCE": "e1e14726380a3fa0bd1e710d41e2175f097f8e0d1aab82aaf7455c903d03b198"
+      },
+      "identity_json": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/build-on/src/xrEngine/overhead/source-identity.json",
+      "binary_dir": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on",
+      "binaries": {
+        "xrAICore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrAICore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrAICore.dylib",
+          "sha256": "9f31bb34d4370937e49c42bc21b3c9ba585f66e17188d55e498a846b45ab32dd",
+          "size": 469216
+        },
+        "xrAPI.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrAPI.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrAPI.dylib",
+          "sha256": "e1ab368d001b68829f90264ffb1df0a780a804132b1db5dbfb564a02b7a55765",
+          "size": 16776
+        },
+        "xrCDB.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrCDB.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrCDB.dylib",
+          "sha256": "97585fa9e25488a10b20b738354c1f467381d8f3173d41e2bd8552da71a169bf",
+          "size": 225512
+        },
+        "xrCore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrCore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrCore.dylib",
+          "sha256": "a63c1cfbacc418c819b17828ff19e9b3376b2e39da6cf74f208ebd8c08b327fd",
+          "size": 579696
+        },
+        "xrEngine.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrEngine.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrEngine.dylib",
+          "sha256": "6d333875c69a37686a81c6cc47c7a6599da18e44bc469a9ed33322eb7ce32fe5",
+          "size": 2974976
+        },
+        "xrGame.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrGame.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrGame.dylib",
+          "sha256": "b508b30f48875619d01a1c41bfde67b8ebd9ed121ccade8421582cfe8cfe1402",
+          "size": 35553168
+        },
+        "xrGameSpy.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrGameSpy.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrGameSpy.dylib",
+          "sha256": "8a50efc7c73618f90d28f1c6a80cb0fda807a5269cf10e2ca27158702affad22",
+          "size": 646864
+        },
+        "xrLuaJIT.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrLuaJIT.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrLuaJIT.dylib",
+          "sha256": "972f7aa1f2d75c281df0cbc0e8a1e4a860ad682651711faf15c66bd64870d1b2",
+          "size": 712432
+        },
+        "xrLuabind.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrLuabind.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrLuabind.dylib",
+          "sha256": "4432aa45f398003f2976938857a7f2601bece3f71de743917b9ef25ee0b9cc2c",
+          "size": 170032
+        },
+        "xrMaterialSystem.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrMaterialSystem.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrMaterialSystem.dylib",
+          "sha256": "a1a55e45b0dc186f36f1e1d9bded525e6b24f4c6a000ce3a9f257b1efeaee47e",
+          "size": 92520
+        },
+        "xrNetServer.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrNetServer.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrNetServer.dylib",
+          "sha256": "88047634b95b17a056e50a6d6655a3562e5701ee6582897204f9a76b6468bd3a",
+          "size": 129200
+        },
+        "xrODE.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrODE.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrODE.dylib",
+          "sha256": "d5ac9296a09918444bce5d0eb9fb8ddd211f1bd3ce282adb59ca646915da0cd7",
+          "size": 328376
+        },
+        "xrOPCODE.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrOPCODE.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrOPCODE.dylib",
+          "sha256": "c480129dda952f164e6ea34080834ab0a647fd8ae18541760d875108786659bd",
+          "size": 170064
+        },
+        "xrParticles.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrParticles.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrParticles.dylib",
+          "sha256": "c3a24927c1a09bd83290c08092776315c57754dd48030fd1c9fda150452cb59d",
+          "size": 173136
+        },
+        "xrPhysics.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrPhysics.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrPhysics.dylib",
+          "sha256": "306ad51788347a5a0e1792270c50681e30c0f7d4a54a0e19b6f84788b160ea25",
+          "size": 938960
+        },
+        "xrRender_GL.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrRender_GL.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrRender_GL.dylib",
+          "sha256": "11148d437571bf84793d6b2ad6fa6ee536fa227b2eeb5f221446222f20d84c31",
+          "size": 4701104
+        },
+        "xrScriptEngine.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrScriptEngine.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrScriptEngine.dylib",
+          "sha256": "ae3a7208a58df574df1c9095c6d0b0d9a5e3d92bb5ea7699595b18c9913be3c5",
+          "size": 431032
+        },
+        "xrSound.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrSound.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrSound.dylib",
+          "sha256": "ca7959351ad91db9faea203f2daaea508714ec73565ef15965e70dc336cf4eeb",
+          "size": 178240
+        },
+        "xrUICore.dylib": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrUICore.dylib",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xrUICore.dylib",
+          "sha256": "f0a9af3f03c4237900deea11bafa7526cc796765d91781c049353de956394987",
+          "size": 1942448
+        },
+        "xr_3da": {
+          "path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xr_3da",
+          "resolved_path": "/Users/rz/orca/workspaces/opagxray/frame-overhead-reference/artifacts/frame-overhead/task-5feca4024e59/bin-on/xr_3da",
+          "sha256": "c65826cca19b7a12bf134bc171d05de173895decdf7e594e37b41db130ac6202",
+          "size": 35496
+        }
+      },
+      "identity_sha256": "a1f6235658417cec2b93eb5e270125a6fca8f41e584b011791189c666e1b50d5"
+    }
+  }
+}
