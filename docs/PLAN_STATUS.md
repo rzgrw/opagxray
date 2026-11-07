@@ -4,6 +4,10 @@
 
 Current execution is moving to Windows. Read [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md) before resuming: it records the reviewed menu repair, final Mac runtime results, WIP provenance/overhead branches, Windows bridge/export/build gaps and transfer recovery instructions. Historical checklist and benchmark claims remain subject to their original platform/evidence limits. Build, test, and live results below are macOS runs unless a 2026-11-08 section names a Windows command. The full engine has still not been built on Windows. The standalone `xrSimCore` tests in the Gate 1 recovery section are the exception.
 
+## First Windows build and playtest — 2026-11-08
+
+x64 Release MSBuild build of `dev` (`4555aa76a` vcxproj inventory, `bec14accc`, `bec540223`) ran CoC 1.4.22 on GL; user verdict "playtest OK". Two crashes found and fixed, **build-verified only, in-game re-check pending**: plain-table key constants (`482a142de`) and the non-fatal ALife graph-vertex duplicate guard plus diagnostic (`215ec351a`). Open: viewport not resized after a resolution change. Runtime staged from the pre-merged CoC install, so it is not measurement-grade. Details and the pending check: [windows-dev-setup.md](windows-dev-setup.md#known-windows-issues). The Windows agent bridge is still a stub; CMake + Ninja on Windows is still unverified.
+
 ## Repository and branch policy — 2026-11-07
 
 - The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray), now **detached** from OpenXRay's GitHub fork network. This supersedes the earlier "no GitHub detachment has occurred" wording here and in the handoff. OpenXRay and IXRay remain inspiration and selective donors: no PR flow upstream, upstream intake only as reviewed, attributed, license-compatible changes.
