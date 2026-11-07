@@ -121,6 +121,18 @@ void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
     VERIFY((*I).second->m_group_id == ID);
     (*I).second->m_group_id = 0xffff;
 
+    // Squad members should not be in the graph vertex registry; log the
+    // state that leads to a duplicate add in graph.update below.
+    CSE_ALifeDynamicObject* object = (*I).second;
+    if (!object->m_bOnline && object->used_ai_locations() &&
+        ai().game_graph().valid_vertex_id(object->m_tGraphID) &&
+        graph.objects()[object->m_tGraphID].objects().objects().count(member_id))
+    {
+        Msg("! ALife: squad [%d] (%s) unregisters member [%d] (%s) still at graph vertex [%d], used_ai_locations [%d]",
+            ID, m_bOnline ? "online" : "offline", member_id, object->m_bOnline ? "online" : "offline",
+            object->m_tGraphID, object->used_ai_locations());
+    }
+
     graph.update((*I).second);
     alife().scheduled().add((*I).second);
     m_members.erase(I);

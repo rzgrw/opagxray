@@ -181,7 +181,12 @@ void CALifeGraphRegistry::add(CSE_ALifeDynamicObject* object, GameGraph::_GRAPH_
     if (!object->m_bOnline && object->used_ai_locations() /**&& object->interactive()**/)
     {
         VERIFY(ai().game_graph().valid_vertex_id(game_vertex_id));
-        m_objects[game_vertex_id].objects().add(object->ID, object);
+        // no_assert=true: duplicate entry is logged and skipped instead of fatal;
+        // observed via CoC squad unregister_member (cause unconfirmed, see the
+        // diagnostic in CSE_ALifeOnlineOfflineGroup::unregister_member).
+        if (m_objects[game_vertex_id].objects().objects().count(object->ID))
+            Msg("! ALife: object [%d] already at graph vertex [%d] during add", object->ID, game_vertex_id);
+        m_objects[game_vertex_id].objects().add(object->ID, object, true);
         object->m_tGraphID = game_vertex_id;
     }
     else if (!m_level && update)
