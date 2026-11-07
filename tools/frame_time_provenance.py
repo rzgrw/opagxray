@@ -67,6 +67,28 @@ UNBOUND = {
     'perf': 'appdata/perf',
 }
 NOT_EFFECTIVE_ROOTS = ('mp', 'levels', 'resources', 'localization', 'patches')
+BRIDGE_FLAG = '-agent_bridge'
+BRIDGE_DEFAULT_REL = 'appdata/agent_bridge.sock'
+# C locale isspace, which is what sscanf("%s") consumes. Unicode spaces such as
+# U+00A0 are not in this set and stay inside the token.
+_C_LOCALE_SPACE = frozenset(' \t\n\v\f\r')
+# proc_pidfdinfo(PROC_PIDFDSOCKETINFO) on this macOS returns 792 bytes, which is
+# sizeof(socket_fdinfo): proc_fileinfo (24) plus socket_info padded to 768.
+# soi_family is the int at 184, soi_kind is the int at 256, and un_sockinfo's
+# sockaddr_un begins at 280 (sun_len, sun_family, sun_path[104]). SOCK_MAXADDRLEN
+# is 255 and is only the address-union dummy, not the path field. soi_stat in
+# that buffer is zero. Vnode flavors of the same fd return no bytes (EBADF), so
+# the lstat inode is not available from these calls.
+SOCKET_FDINFO_SIZE = 792
+SOI_FAMILY_OFFSET = 184
+SOI_KIND_OFFSET = 256
+SUN_FAMILY_OFFSET = 281
+BRIDGE_SUN_PATH_OFFSET = 282
+BRIDGE_SUN_PATH_MAX = 104
+AF_UNIX = 1
+SOCKINFO_UN = 3
+PROC_PIDFDSOCKETINFO = 3
+PROX_FDTYPE_SOCKET = 2
 EXIT = {'verified': 0, 'mismatch': 1, 'unknown': 2, 'timeout': 3}
 LC_ID_DYLIB = 0xD
 LOAD_COMMANDS = {0xC, 0x80000018, 0x8000001F}
@@ -448,6 +470,524 @@ def _bind_filesystem(root_real: Path, argv: list[str]) -> str | None:
         raise GateError('mismatch', 'filesystem_redirect', overlay,
                         'overlaypath redirects appdata outside the generated layout')
     return fsltx
+
+
+def _engine_command_line(argv: list[str]) -> str:
+    """Core.Params on macOS: argv[1:] joined, each element followed by a space."""
+    if len(argv) <= 1:
+        return ''
+    return ''.join(item + ' ' for item in argv[1:])
+
+
+def _agent_bridge_token(argv: list[str]) -> str | None:
+    """Engine bind token, '' for the default socket, or None when the flag is absent.
+
+    Mirrors strstr("-agent_bridge") and sscanf(" %s") in the C locale. Only
+    space, tab, newline, vertical tab, form feed, and carriage return separate
+    the token. A missing token or a token that starts with '-' selects
+    appdata/agent_bridge.sock. No flag means the engine creates no socket.
+    `-agent_bridge=` has no space, so the glued text is the token and is not
+    the default.
+    """
+    command = _engine_command_line(argv)
+    index = command.find(BRIDGE_FLAG)
+    if index < 0:
+        return None
+    rest = command[index + len(BRIDGE_FLAG):]
+    cursor = 0
+    while cursor < len(rest) and rest[cursor] in _C_LOCALE_SPACE:
+        cursor += 1
+    if cursor >= len(rest):
+        return ''
+    end = cursor
+    while end < len(rest) and rest[end] not in _C_LOCALE_SPACE:
+        end += 1
+    token = rest[cursor:end].replace('\\', '/')
+    if token.startswith('-'):
+        return ''
+    return token
+
+
+def _path_aliases(path: str) -> list[str]:
+    """Lexical /var and /private/var spellings. Does not stat or follow a symlink."""
+    found = [path]
+    for prefix, swap in (('/private/var/', '/var/'), ('/var/', '/private/var/')):
+        if path.startswith(prefix):
+            found.append(swap + path[len(prefix):])
+    unique = []
+    for item in found:
+        if item not in unique:
+            unique.append(item)
+    return unique
+
+
+def _bridge_relative(root_real: Path, token: str) -> str:
+    if token == '':
+        return BRIDGE_DEFAULT_REL
+    if token.startswith('/'):
+        matches = []
+        for root in _path_aliases(str(root_real)):
+            prefix = root.rstrip('/') + '/'
+            if token.startswith(prefix):
+                matches.append(token[len(prefix):])
+        if not matches:
+            raise GateError('mismatch', 'unexpected_path', token, 'bridge socket leaves appdata')
+        if any(item != matches[0] for item in matches):
+            raise GateError('mismatch', 'ambiguous_path', token, 'bridge socket path is ambiguous')
+        return matches[0]
+    return token
+
+
+def _bridge_bind_paths(root_real: Path, cwd: str, token: str, rel: str) -> list[str]:
+    """Path strings bind() may have stored. Exact sun_path equality, not a suffix."""
+    found: list[str] = []
+    if token == '':
+        for base in (cwd, str(root_real)):
+            text = base.replace('\\', '/')
+            if text.endswith('/'):
+                found.append(text + BRIDGE_DEFAULT_REL)
+            else:
+                found.append(text + '/' + BRIDGE_DEFAULT_REL)
+        found.append(BRIDGE_DEFAULT_REL)
+    elif token.startswith('/'):
+        found.append(token)
+    else:
+        found.append(token)
+        found.append(str(root_real.joinpath(*rel.split('/'))))
+    paths: list[str] = []
+    for item in found:
+        for alias in _path_aliases(item):
+            if alias not in paths:
+                paths.append(alias)
+    return paths
+
+
+def _lstat_bridge_socket(root_real: Path, rel: str) -> os.stat_result:
+    parts = rel.split('/')
+    cursor = root_real
+    walked: list[str] = []
+    for part in parts[:-1]:
+        walked.append(part)
+        cursor = cursor / part
+        ancestor = '/'.join(walked)
+        try:
+            info = os.lstat(cursor)
+        except FileNotFoundError as exc:
+            raise GateError('mismatch', 'nonregular', rel,
+                            'declared bridge endpoint is missing') from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise GateError('mismatch', 'symlink', ancestor, 'symlink')
+        if not stat.S_ISDIR(info.st_mode):
+            raise GateError('mismatch', 'nonregular', ancestor,
+                            'declared bridge endpoint is not a socket')
+        if Path(os.path.realpath(cursor)) != cursor:
+            raise GateError('mismatch', 'ambiguous_path', ancestor,
+                            'canonical path differs from the lexical path')
+    leaf = cursor / parts[-1]
+    try:
+        info = os.lstat(leaf)
+    except FileNotFoundError as exc:
+        raise GateError('mismatch', 'nonregular', rel, 'declared bridge endpoint is missing') from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise GateError('mismatch', 'symlink', rel, 'symlink')
+    if not stat.S_ISSOCK(info.st_mode):
+        raise GateError('mismatch', 'nonregular', rel, 'declared bridge endpoint is not a socket')
+    return info
+
+
+def _libproc() -> ctypes.CDLL | None:
+    try:
+        library = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+    except OSError:
+        return None
+    library.proc_pidinfo.argtypes = [
+        ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+    library.proc_pidinfo.restype = ctypes.c_int
+    library.proc_pidfdinfo.argtypes = [
+        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    library.proc_pidfdinfo.restype = ctypes.c_int
+    return library
+
+
+def _pid_fd_bytes(library: ctypes.CDLL, pid: int) -> bytes | None:
+    size = 256
+    while size <= 1 << 20:
+        ctypes.set_errno(0)
+        buf = ctypes.create_string_buffer(size)
+        got = library.proc_pidinfo(pid, 1, 0, buf, size)
+        if got < 0:
+            return None
+        if got < size:
+            return buf.raw[:got]
+        size *= 2
+    return None
+
+
+def _unix_sun_path(data: bytes) -> bytes | None:
+    """sun_path from one complete AF_UNIX socket_fdinfo, or None if unsupported.
+
+    A short return, a non-UNIX family or kind, or a pathname whose NUL is
+    outside sun_path[104] is rejected. This does not read soi_stat: on this
+    Darwin that inode is zero and is not the directory node.
+    """
+    if len(data) != SOCKET_FDINFO_SIZE:
+        return None
+    family = int.from_bytes(data[SOI_FAMILY_OFFSET:SOI_FAMILY_OFFSET + 4], 'little', signed=True)
+    kind = int.from_bytes(data[SOI_KIND_OFFSET:SOI_KIND_OFFSET + 4], 'little', signed=True)
+    if family != AF_UNIX or kind != SOCKINFO_UN or data[SUN_FAMILY_OFFSET] != AF_UNIX:
+        return None
+    field = data[BRIDGE_SUN_PATH_OFFSET:BRIDGE_SUN_PATH_OFFSET + BRIDGE_SUN_PATH_MAX]
+    end = field.find(b'\0')
+    if end < 0:
+        return None
+    return field[:end]
+
+
+def _process_owns_bridge_socket(pid: int, paths: list[str]) -> bool:
+    """True when pid has an AF_UNIX fd whose sun_path is exactly one bind path.
+
+    True means the C string matched. It does not mean that fd owns the inode
+    now at that path.
+    """
+    wanted = []
+    for path in paths:
+        encoded = os.fsencode(path)
+        if encoded and encoded not in wanted:
+            wanted.append(encoded)
+    if not wanted or pid <= 0:
+        return False
+    library = _libproc()
+    if library is None:
+        return False
+    listing = _pid_fd_bytes(library, pid)
+    if listing is None or len(listing) % 8:
+        return False
+    for offset in range(0, len(listing), 8):
+        fd = int.from_bytes(listing[offset:offset + 4], 'little', signed=True)
+        kind = int.from_bytes(listing[offset + 4:offset + 8], 'little')
+        if kind != PROX_FDTYPE_SOCKET:
+            continue
+        ctypes.set_errno(0)
+        raw = ctypes.create_string_buffer(4096)
+        got = library.proc_pidfdinfo(pid, fd, PROC_PIDFDSOCKETINFO, raw, 4096)
+        if got != SOCKET_FDINFO_SIZE:
+            continue
+        path = _unix_sun_path(raw.raw[:got])
+        if path is not None and path in wanted:
+            return True
+    return False
+
+
+def _directory_id(path: str) -> tuple[int, int] | None:
+    """Device and inode of an existing directory. Final symlinks are followed.
+
+    Identity is not a lowercased path. On a case-insensitive volume, two
+    spellings of one directory share this id; on a case-sensitive volume they
+    do not.
+    """
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return None
+    if stat.S_ISLNK(info.st_mode):
+        try:
+            info = os.stat(path)
+        except OSError:
+            return None
+    if not stat.S_ISDIR(info.st_mode):
+        return None
+    return (info.st_dev, info.st_ino)
+
+
+def _ancestor_ids(path: str) -> list[tuple[int, int]]:
+    current = os.path.normpath(path)
+    found: list[tuple[int, int]] = []
+    seen: set[str] = set()
+    while current not in seen:
+        seen.add(current)
+        ident = _directory_id(current)
+        if ident is not None and ident not in found:
+            found.append(ident)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return found
+
+
+def _directories_overlap(left: str, right: str) -> bool:
+    """True when two existing directories are equal or one contains the other.
+
+    Comparison uses directory device/inode in both directions. realpath on
+    this macOS volume keeps the requested spelling, so string prefixes miss
+    a case alias of the same inode.
+    """
+    left_self = _directory_id(os.path.normpath(left))
+    right_self = _directory_id(os.path.normpath(right))
+    if left_self is None or right_self is None:
+        return False
+    return left_self in _ancestor_ids(right) or right_self in _ancestor_ids(left)
+
+
+def _external_failure(path: str, detail: str) -> GateError:
+    return GateError('mismatch', 'external_directory', path, detail)
+
+
+def _sealed_external_directory(launcher: dict, passed: str | None) -> str | None:
+    """Optional launcher field. A passed inspect value must match it exactly."""
+    if 'external_communication_directory' not in launcher or launcher.get('external_communication_directory') is None:
+        sealed = None
+    else:
+        sealed = launcher['external_communication_directory']
+        if not isinstance(sealed, str) or not sealed:
+            raise _external_failure(str(sealed), 'external communication directory is not a path')
+    if passed is not None and passed != sealed:
+        raise _external_failure(
+            passed, 'inspect declaration does not match the sealed launcher record')
+    return sealed
+
+
+def _note_external_lstat(path: str, after_lstat) -> None:
+    if after_lstat is not None:
+        after_lstat(Path(path))
+    deadline = _ACTIVE_DEADLINE.get()
+    if deadline is not None:
+        deadline.check()
+
+
+def _lexical_absolute(text: str, detail: str) -> None:
+    if not text.startswith('/') or text.endswith('/') or '\\' in text or '//' in text:
+        raise _external_failure(text, detail)
+    parts = text.split('/')
+    if any(part in {'', '.', '..'} for part in parts[1:]):
+        raise _external_failure(text, detail)
+    if any(char.isspace() or char in _C_LOCALE_SPACE for char in text):
+        raise _external_failure(text, detail)
+
+
+def _generated_communication_roots(root_real: Path) -> list[tuple[str, str]]:
+    """Alias and settings directories the external directory must not touch.
+
+    Longer trees come first so appdata and configs win over their parents.
+    """
+    roots = [
+        (root_real / 'appdata', 'settings closure'),
+        (root_real / 'gamedata' / 'configs', 'settings closure'),
+    ]
+    for name in sorted(ARCHIVE_CONTAINERS):
+        roots.append((root_real / 'database' / name, 'generated alias'))
+    for name in sorted(GAMEDATA_CHILDREN):
+        if name == 'configs':
+            continue
+        roots.append((root_real / 'gamedata' / name, 'generated alias'))
+    roots.append((root_real / 'database', 'generated alias'))
+    roots.append((root_real / 'gamedata', 'generated alias'))
+    return [(os.path.realpath(path), kind) for path, kind in roots]
+
+
+def _external_overlap(directory: str, root_real: Path, executable: str, manifest: dict) -> None:
+    hits = []
+    app_dir = os.path.dirname(os.path.realpath(executable))
+    if _directories_overlap(directory, app_dir):
+        hits.append('application directory')
+    for key in ('base', 'patch', 'overlay'):
+        root = os.path.realpath(manifest[key])
+        if _directories_overlap(directory, root):
+            hits.append('manifest root')
+            break
+    for path, kind in _generated_communication_roots(root_real):
+        if _directories_overlap(directory, path):
+            hits.append(kind)
+            break
+    runtime = os.path.realpath(root_real)
+    if _directories_overlap(directory, runtime):
+        hits.append('runtime')
+    messages = {
+        'settings closure': 'external communication directory overlaps a settings closure',
+        'generated alias': 'external communication directory overlaps a generated alias',
+        'manifest root': 'external communication directory overlaps a manifest root',
+        'runtime': 'external communication directory overlaps the runtime',
+        'application directory': 'external communication directory overlaps the application directory',
+    }
+    for kind in messages:
+        if kind in hits:
+            raise _external_failure(directory, messages[kind])
+
+
+def _ordinary_external_socket(argv: list[str], directory: str) -> str:
+    args = argv[1:]
+    exact = [arg for arg in args if arg == BRIDGE_FLAG]
+    embedded = [arg for arg in args if BRIDGE_FLAG in arg and arg != BRIDGE_FLAG]
+    if len(exact) != 1 or embedded:
+        raise _external_failure(directory, 'agent_bridge flag is not a single ordinary absolute path')
+    index = args.index(BRIDGE_FLAG)
+    if index + 1 >= len(args):
+        raise _external_failure(directory, 'agent_bridge flag is not a single ordinary absolute path')
+    token = args[index + 1]
+    if token.startswith('-') or not token.startswith('/'):
+        raise _external_failure(token, 'agent_bridge path is not the declared socket leaf')
+    try:
+        _lexical_absolute(token, 'agent_bridge path is not the declared socket leaf')
+    except GateError as error:
+        if any(char.isspace() or char in _C_LOCALE_SPACE for char in token):
+            raise _external_failure(token, 'agent_bridge path contains whitespace') from error
+        raise
+    if len(os.fsencode(token)) > 103:
+        raise _external_failure(token, 'agent_bridge path exceeds 103 bytes')
+    prefix = directory + '/'
+    leaf = token[len(prefix):] if token.startswith(prefix) else ''
+    if not leaf or '/' in leaf or leaf.startswith('.'):
+        raise _external_failure(token, 'agent_bridge path is not the declared socket leaf')
+    return token
+
+
+def _external_bridge_socket(root_real: Path, launcher: dict, directory: str, manifest: dict,
+                            executable: str, after_lstat) -> dict:
+    """One sealed external endpoint. lstat identity is change detection, not fd ownership.
+
+    The runner is trusted only as a nonadversarial same-user process that created
+    this directory. That assumption is not asset evidence and not proof the pid
+    owns the socket inode. sun_path is not consulted.
+    """
+    _lexical_absolute(directory, 'external communication directory is not canonical')
+    _note_external_lstat(directory, after_lstat)
+    try:
+        info = os.lstat(directory)
+    except FileNotFoundError as exc:
+        raise _external_failure(directory, 'external communication directory is missing') from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise _external_failure(directory, 'external communication directory is a symlink')
+    if not stat.S_ISDIR(info.st_mode):
+        raise _external_failure(directory, 'external communication directory is not a directory')
+    if os.path.realpath(directory) != directory:
+        raise _external_failure(directory, 'external communication directory is not canonical')
+    _external_overlap(directory, root_real, executable, manifest)
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        raise _external_failure(directory, 'external communication directory mode is not 0700')
+    if info.st_uid != os.geteuid():
+        raise _external_failure(directory, 'external communication directory owner is not the current uid')
+    token = _ordinary_external_socket(launcher['argv'], directory)
+    # The callback may chmod or replace the directory before this lstat. The
+    # lstat follows a directory symlink, so the directory is read again below
+    # and that result wins over a deadline that expires in the same callback.
+    if after_lstat is not None:
+        after_lstat(Path(token))
+    try:
+        sock = os.lstat(token)
+    except OSError as exc:
+        sock_error: OSError | None = exc
+        sock = None
+    else:
+        sock_error = None
+    if after_lstat is not None:
+        after_lstat(Path(directory))
+    info = _recheck_external_directory(directory, info)
+    deadline = _ACTIVE_DEADLINE.get()
+    if deadline is not None:
+        deadline.check()
+    if sock is None:
+        raise _external_failure(token, 'declared bridge endpoint is missing') from sock_error
+    if stat.S_ISLNK(sock.st_mode):
+        raise _external_failure(token, 'declared bridge endpoint is a symlink')
+    if not stat.S_ISSOCK(sock.st_mode):
+        raise _external_failure(token, 'declared bridge endpoint is not a socket')
+    return {
+        'path': token,
+        'dev': str(sock.st_dev),
+        'ino': str(sock.st_ino),
+        'association': 'external-observation',
+        'directory': {
+            'path': directory,
+            'dev': str(info.st_dev),
+            'ino': str(info.st_ino),
+            'mode': '0700',
+            'uid': str(info.st_uid),
+        },
+    }
+
+
+def _recheck_external_directory(directory: str, before: os.stat_result) -> os.stat_result:
+    """Reject a directory that moved or changed mode while its socket was observed."""
+    try:
+        info = os.lstat(directory)
+    except OSError as exc:
+        raise GateError('unknown', 'stat_race', directory,
+                        'external communication directory changed during inspection') from exc
+    drifted = (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISDIR(info.st_mode)
+        or os.path.realpath(directory) != directory
+        or info.st_dev != before.st_dev
+        or info.st_ino != before.st_ino
+        or stat.S_IMODE(info.st_mode) != stat.S_IMODE(before.st_mode)
+        or info.st_uid != before.st_uid
+    )
+    if drifted:
+        raise GateError('unknown', 'stat_race', directory,
+                        'external communication directory changed during inspection')
+    return info
+
+
+def _bridge_socket(root_real: Path, launcher: dict, process, *, require_live_fd: bool,
+                   external_directory: str | None = None, manifest: dict | None = None,
+                   executable: str | None = None, after_lstat=None) -> dict | None:
+    """The one communication endpoint, or None when the engine opens none."""
+    declared = _sealed_external_directory(launcher, external_directory)
+    if declared is not None:
+        if manifest is None or executable is None:
+            raise _external_failure(declared, 'external communication directory is not sealed with the runtime')
+        return _external_bridge_socket(
+            root_real, launcher, declared, manifest, executable, after_lstat)
+    token = _agent_bridge_token(launcher['argv'])
+    if token is None:
+        return None
+    rel = _bridge_relative(root_real, token)
+    check_relative(rel)
+    _dotfile(rel)
+    if not rel.startswith('appdata/') or rel == 'appdata':
+        raise GateError('mismatch', 'unexpected_path', token or rel, 'bridge socket leaves appdata')
+    info = _lstat_bridge_socket(root_real, rel)
+    observation = getattr(process, 'observation', 'live')
+    association = 'launcher-record'
+    # A dead pid has no fd table to read. Attest still compares the lstat identity.
+    # Seal reaches this only after _observe has required the pid to be alive.
+    if observation == 'live' and process.alive(launcher['pid']):
+        if not _process_owns_bridge_socket(
+                launcher['pid'], _bridge_bind_paths(root_real, launcher['cwd'], token, rel)):
+            raise GateError('unknown', 'process_unverified', rel,
+                            'bridge socket is not an AF_UNIX fd of the launched process')
+        # Path text matched a fd. libproc does not identify which inode that fd
+        # is, including after unlink and rebind, so this is not live-fd.
+        association = 'path-only'
+    elif observation == 'live' and require_live_fd:
+        raise GateError('unknown', 'process_unverified', rel,
+                        'bridge socket is not an AF_UNIX fd of the launched process')
+    elif observation == 'live':
+        association = 'not-rechecked'
+    return {
+        'path': rel,
+        'dev': str(info.st_dev),
+        'ino': str(info.st_ino),
+        'association': association,
+    }
+
+
+def _bridge_identity(record: object) -> tuple[str, ...] | None:
+    if record is None:
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get('path'), str):
+        return ('', '', '', '', '', '', '')
+    directory = record.get('directory')
+    if directory is None:
+        directory_key = ('', '', '', '', '')
+    elif not isinstance(directory, dict):
+        directory_key = ('?', '?', '?', '?', '?')
+    else:
+        directory_key = (
+            str(directory.get('path')), str(directory.get('dev')), str(directory.get('ino')),
+            str(directory.get('mode')), str(directory.get('uid')),
+        )
+    return (record['path'], str(record.get('dev')), str(record.get('ino')), *directory_key)
 
 
 def console_spec(argv: list[str]) -> str:
@@ -912,7 +1452,8 @@ def _is_under(path: Path, root: Path) -> bool:
     return True
 
 
-def _rogue_archives(root_real: Path, manifest_keys: set[str]) -> None:
+def _rogue_archives(root_real: Path, manifest_keys: set[str], bridge_rel: str | None = None,
+                    bridge_identity: tuple[str, str] | None = None) -> None:
     appdata = root_real / 'appdata'
     if not appdata.exists():
         return
@@ -935,6 +1476,18 @@ def _rogue_archives(root_real: Path, manifest_keys: set[str]) -> None:
             path = parent / name
             if path.is_symlink():
                 raise GateError('mismatch', 'symlink', rel, 'symlink')
+            if bridge_rel is not None and rel == bridge_rel:
+                try:
+                    info = os.lstat(path)
+                except FileNotFoundError as exc:
+                    raise GateError('unknown', 'stat_race', rel,
+                                    'bridge socket disappeared while scanning') from exc
+                if not stat.S_ISSOCK(info.st_mode):
+                    raise GateError('mismatch', 'nonregular', rel,
+                                    'declared bridge endpoint is not a socket')
+                if bridge_identity != (str(info.st_dev), str(info.st_ino)):
+                    raise GateError('unknown', 'stat_race', rel, 'bridge socket changed while scanning')
+                continue
             if not path.is_file():
                 raise GateError('mismatch', 'nonregular', rel, 'not a regular file')
             _reject_archive(rel, name, manifest_keys)
@@ -1025,20 +1578,27 @@ def _hash_images(executable: str, images: list[str], deadline: Deadline, chunk_s
 
 def inspect_runtime(runtime: Path, launcher_path: Path, *, config: str, process, deadline: Deadline,
                     chunk_size: int = CHUNK, after_lstat=None, require_process: bool = True,
-                    sealed_images: list[dict] | None = None) -> dict:
-    """Rehash one runtime. This does not read a capture and does not accept a measurement."""
+                    sealed_images: list[dict] | None = None,
+                    external_communication_directory: str | None = None) -> dict:
+    """Rehash one runtime. This does not read a capture and does not accept a measurement.
+
+    `external_communication_directory` defaults to None. Existing callers stay
+    valid. When passed, it must equal the optional sealed launcher field.
+    """
     token = _ACTIVE_DEADLINE.set(deadline)
     try:
         return _inspect_runtime(runtime, launcher_path, config=config, process=process,
                                 deadline=deadline, chunk_size=chunk_size, after_lstat=after_lstat,
-                                require_process=require_process, sealed_images=sealed_images)
+                                require_process=require_process, sealed_images=sealed_images,
+                                external_communication_directory=external_communication_directory)
     finally:
         _ACTIVE_DEADLINE.reset(token)
 
 
 def _inspect_runtime(runtime: Path, launcher_path: Path, *, config: str, process, deadline: Deadline,
                      chunk_size: int = CHUNK, after_lstat=None, require_process: bool = True,
-                     sealed_images: list[dict] | None = None) -> dict:
+                     sealed_images: list[dict] | None = None,
+                     external_communication_directory: str | None = None) -> dict:
     root_real = prepare_root(Path(runtime))
     deadline.check()
     launcher, launcher_raw = load_launcher(Path(launcher_path), root_real)
@@ -1066,7 +1626,15 @@ def _inspect_runtime(runtime: Path, launcher_path: Path, *, config: str, process
             if os.path.realpath(live_exe) != os.path.realpath(executable) or live_set != sealed_set:
                 raise GateError('mismatch', 'image_set', live_exe, 'mapped images changed while the process was alive')
             images = live_images
-    _rogue_archives(root_real, keys)
+    bridge = _bridge_socket(
+        root_real, launcher, process, require_live_fd=require_process,
+        external_directory=external_communication_directory, manifest=manifest,
+        executable=executable, after_lstat=after_lstat)
+    if bridge is not None and bridge.get('association') == 'path-only':
+        raise GateError('unknown', 'process_unverified', bridge['path'],
+                        'AF_UNIX sun_path does not identify the current socket inode')
+    _rogue_archives(root_real, keys, None if bridge is None else bridge['path'],
+                    None if bridge is None else (bridge['dev'], bridge['ino']))
     managed_rows = _scan_assets(root_real, manifest, keys, deadline, chunk_size, after_lstat)
     settings_rows, settings_paths, console_rel = _settings(
         root_real, launcher['argv'], keys, deadline, chunk_size, after_lstat)
@@ -1103,6 +1671,7 @@ def _inspect_runtime(runtime: Path, launcher_path: Path, *, config: str, process
         'launcher_cwd': os.path.realpath(launcher['cwd']),
         'launcher_sha256': hashlib.sha256(launcher_raw).hexdigest(),
         'fsltx': fsltx_path,
+        'bridge_socket': bridge,
         'not_effective_roots': list(NOT_EFFECTIVE_ROOTS),
         'unbound': unbound,
         'settings_limit': SETTINGS_LIMIT,
@@ -1130,6 +1699,11 @@ def _compare(sealed: dict, current: dict) -> list[str]:
     if sealed.get('launcher_sha256') != current['launcher_sha256']:
         raise GateError('mismatch', 'launcher_identity', '',
                         'launcher record bytes changed after the seal')
+    if _bridge_identity(sealed.get('bridge_socket')) != _bridge_identity(current.get('bridge_socket')):
+        shown = current.get('bridge_socket') or {}
+        raise GateError('mismatch', 'launcher_identity',
+                        shown.get('path', '') if isinstance(shown, dict) else '',
+                        'bridge socket identity changed after the seal')
     if sealed.get('manifest_sha256') != current['manifest_sha256']:
         raise GateError('mismatch', 'manifest_bytes', 'stage-manifest.json', 'manifest bytes changed')
     if sealed.get('managed_aggregate') != current['managed_aggregate']:
