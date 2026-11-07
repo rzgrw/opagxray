@@ -2,6 +2,18 @@
 
 Start here in the next agent session. The user is moving debugging and implementation to a Windows laptop. Mac worker contexts are frozen for transfer; do not resume old Orca dispatch IDs on the new machine.
 
+## Restore directly from GitHub (PowerShell)
+
+```powershell
+git clone --branch transfer/windows-2026-11-07 https://github.com/rzgrw/opagxray.git C:\src\OpenXVibeRay
+Set-Location C:\src\OpenXVibeRay
+git config core.autocrlf false
+git submodule update --init --recursive
+git status --short --branch
+```
+
+Read [the compact checkpoint reports](transfer/2026-11-07/README.md) and [the next-session prompt](transfer/2026-11-07/NEXT_SESSION_PROMPT.txt). The transfer branch includes provenance WIP; `dev` is the reviewed checkpoint. Both overhead experiment branches are pushed separately and must not be merged wholesale. The local bundle instructions below are an alternative offline recovery path. Game archives must still be copied separately. Large Mac artifacts remain in the local archive; compact reports needed for continuation are checked in here.
+
 ## Goal and priorities
 
 OpenXVibeRay should combine justified improvements from IXRay and OpenXRay with its own roadmap. Stability and frame-time consistency are first. Keep the exact CoC 1.4.12 base + 1.4.22 patch content; record each engine overlay separately. No local performance gain or comparative benchmark has been established yet. Independence means our own roadmap/releases; upstream tracking and selective intake remain allowed. Remote detachment, branding, license changes and wholesale renderer/physics imports have not happened.
