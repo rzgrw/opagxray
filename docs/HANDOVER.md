@@ -1,6 +1,6 @@
 # OpenXVibeRay — Handover
 
-**Last updated:** 2026-11-07 (status refresh against `dev` `950a7820b`; detached fork, Windows continuation)
+**Last updated:** 2026-11-08 (Gate 1 standalone tests and Metal M-R1 assessment on `integrate/gate1-recovery`; prior status refresh was 2026-11-07 against `dev` `950a7820b`)
 **Written for:** a fresh coding agent (Codex) or engineer picking this repo up with zero prior context.
 
 ---
@@ -31,10 +31,10 @@ Original AI design (refined by the thin-harness and authority-spine specs linked
 |---|---|---|
 | `main` | `950a7820b` (2026-11-07) | stable; GitHub default branch |
 | `dev` | started at `950a7820b`; later commits are docs-only so far | experimental integration: M-R0, AI harness, IXRay foundation, Task 1, frame-time telemetry/provenance, menu reload repair, Windows handoff |
-| tag `archive/codex/ai-authority-spine-gate1` → `1d951aa07` | unmerged recovery source | partial Tasks 1–10; not ready to merge, no Gate 1 completion claim |
+| tag `archive/codex/ai-authority-spine-gate1` → `1d951aa07` | unmerged recovery source | partial Tasks 1–10; not ready to merge, no Gate 1 completion claim. 2026-11-08: only `tools/xrsim_standalone` was taken onto `integrate/gate1-recovery` |
 | Task 1 canonical state | integrated at `04b4ef5b5` | independently reviewed and tested; authority/commit remain queued after the runtime comparison |
 | `feat/metal-mr0-first-frame` (historical, deleted) | **merged to dev** via PR #9 (repository was then named `OpenXVibeRay`) | Metal renders the CoC main menu. GL/DX11 untouched. |
-| tag `archive/feat/metal-mr1-ingame` → `caa2e4953` | WIP, **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. Branched off the pre-merge M-R0 tip — rebase onto current `dev` when resuming. |
+| tag `archive/feat/metal-mr1-ingame` → `caa2e4953` | WIP, **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. 2026-11-08: merges cleanly onto `dev` `437cca1aa` and was left archived because it edits shared GL shader sources. |
 | tags `archive/rzgrw/frame-overhead-base` → `617957470`, `archive/rzgrw/frame-overhead-reference` → `d603c01d2` | WIP experiments | recover selectively per [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md); never merge wholesale |
 | tag `archive/transfer/windows-2026-11-07` → `d336361d1` | transfer snapshot | only copy of `docs/transfer/2026-11-07/` evidence and provenance WIP `8cf2af572`; recover selectively |
 
@@ -122,6 +122,8 @@ not establish image correctness: inspect world, inventory, and menu captures.
 
 **Status:** menu renders perfectly on Metal; in-game the **gbuffer geometry pass works** (rt_Position holds the full scene) but the **deferred lighting/combine chain produces a magenta frame**. Foundation is committed at `caa2e4953`, preserved as tag `archive/feat/metal-mr1-ingame` (the branch was deleted).
 
+**2026-11-08 assessment (not integrated):** `git merge-tree` onto `dev` `437cca1aa` applied with no conflicts (result tree `e5579d7dc`). The commit still edits `res/gamedata/shaders/gl/` (six shader files the GL renderer loads) plus shared `xrRender` / `xrRender_R2` sources. C++ branches are `USE_METAL`-gated and the shader `#else` text matches the previous GL lines, but those shader files are outside Metal-only paths, and the menu-quad change depends on `stub_notransform_t_menu.vs`. The commit was left whole on the tag. It was not built: no macOS or Metal SDK on this machine. `XRAY_METAL` stays OFF.
+
 ### 4.1 What already landed (all correct, verified)
 - **Default sampler** bound with every texture (`metalHW.*`, `metalR_Backend_Runtime.h`). Unbound samplers are UB on Metal and were corrupting all textured draws.
 - **`SM_METAL` macro** (`metal_shaders.cpp`) → GL-only Y-flips take the D3D form (Metal RTs are top-left origin, `[0..1]` depth). Applied in the 5 fullscreen stubs + `ssr.h`.
@@ -149,7 +151,11 @@ The running game loads GLSL from a **copy** at `<CoC gamedata>/shaders/gl/`, **n
 
 ## 5. The active work — AI implementation on GL
 
-**Gate 1 Task 1 canonical state is integrated** at `04b4ef5b5`; further authority-spine recovery follows the current stability/performance investigation. Read [PLAN_STATUS.md](PLAN_STATUS.md#gate-1-recovery-and-remaining-gates) for order and unresolved Task 3 contracts. Original agentic-Zone design: [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
+**Gate 1 Task 1 canonical state is integrated** at `04b4ef5b5`; further authority-spine recovery follows the current stability/performance investigation. Read [PLAN_STATUS.md](PLAN_STATUS.md#gate-1-recovery-and-remaining-gates) for order and unresolved Task 3 contracts. On 2026-11-08, `integrate/gate1-recovery` took only `tools/xrsim_standalone` from tag `archive/codex/ai-authority-spine-gate1` (`1d951aa07`). Tasks 2+, live zone wiring, and the reanimation proposal stay on that tag.
+
+Standalone xrSim tests do not need the engine. On Windows, from a VS 2022 x64 developer shell (verified 2026-11-08, MSVC 19.44, curl absent): `cmake -S tools\xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release`, then `cmake --build build-xrsim --parallel`, then `build-xrsim\xrSimAuthoritySpineTests.exe` and `build-xrsim\xrSimWorldStateTests.exe`. Both exited 0 with no `FAIL` lines (14 groups and 76 cases in `main`). `tools/xrsim_standalone/build_and_test.sh` remains the Linux/macOS entry.
+
+Original agentic-Zone design: [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
 
 Shape of it (per the spec and the design decisions in project memory):
 - The Zone is **simulated by LLM agents** (persistent `WorldAgents`) that own world evolution. This is a **complete simulation rewrite**, not a sidecar: legacy ALife becomes the compatibility/materialization surface while `xrMind` + `xrSim` take over world authority.
