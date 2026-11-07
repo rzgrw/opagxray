@@ -1,5 +1,9 @@
 # Plan status — 2026-11-07
 
+## Windows transfer — 2026-11-07
+
+Current execution is moving to Windows. Read [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md) before resuming: it records the reviewed menu repair, final Mac runtime results, WIP provenance/overhead branches, Windows bridge/export/build gaps and transfer recovery instructions. Historical checklist and benchmark claims remain subject to their original platform/evidence limits.
+
 Reconciled against local `dev` baseline `8984220b6`; Git refs and source presence
 were checked, but no build, game, provider, or acceptance test was run for this
 inventory. **Stability and frame-time consistency on OpenGL are the current priority.** Historical checkboxes are

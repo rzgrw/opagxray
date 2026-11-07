@@ -2,6 +2,8 @@
 
 ## Project Overview
 
+**Windows continuation:** read [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) first when restoring the 2026-11-07 transfer. The Windows bridge/export and current build inventories need validation; Mac acceptance is not Windows acceptance.
+
 OpenXVibeRay is a fork of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The original engine is **inspiration and foundation, not scripture**. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision.
 
 - **Runtime:** OpenGL is the working baseline and **stability and frame-time consistency are the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953`, Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
