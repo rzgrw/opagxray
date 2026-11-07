@@ -1,7 +1,7 @@
 # Frame-time measurement — design
 
 **Date:** 2026-11-07
-**Status:** Standalone core and offline reporter implemented; runtime integration pending
+**Status:** Runtime integration implemented with bounded functional evidence; independent review and performance/provenance acceptance pending
 **Scope:** OpenXVibeRay target GL instrumentation first
 
 ## Purpose
@@ -86,7 +86,7 @@ States are `disabled`, `armed`, `capturing`, `saturated`, `stop_pending`, and `s
 
 Starting while already active fails; starting after stopped returns `reset_required` until an explicit reset. Phase/order/overflow errors, including reversal during warmup or stop-pending, increment `invalid_loops` without wrapping and prevent acceptance; a reversed boundary and the interval beginning there cannot become clean retained data. Loop-sequence exhaustion stops acceptance with `loop_sequence_overflow` instead of wrapping IDs. Stopped samples are immutable. Client disconnect does not implicitly start, stop, reset, or export a capture.
 
-The explicit phase begin/end API has no scope token or capture-generation identity. Future hooks must use loop-scoped RAII and must not carry a scope across stop/reset/new capture; an old same-phase end can otherwise close a newly opened phase. The standalone core does not claim token-based stale-scope rejection.
+The standalone explicit begin/end API still has no token. Runtime hooks now use `FrameTimeSession` generation-checked, owner-thread scopes; a new outer loop or successful start/stop/reset invalidates old scope ends, so they cannot close a new same-phase span. No runtime scope crosses bridge dispatch. Rejected active perf controls deliberately invalidate their current loop, counting it as an invalid diagnostic rather than a clean timing sample.
 
 ### Loading and shutdown limitations
 
@@ -124,3 +124,7 @@ The first measurement gate is target-only, visible GL, fixed location/camera/res
 The runtime overhead gate remains open until a common external or separately gated reference can measure disabled and pre-change binaries over the same full-loop boundary. Those binaries cannot export this collector's distributions; do not invent comparable values from FPS, sparse bridge samples, or donor autotest. Capture-active overhead is assessed only after that reference method is validated.
 
 Only after those gates pass, add separate movement and load-save-reload-normal-quit scenarios. Donor work remains blocked until an equivalent visible, steady-clock, start-to-start implementation exists; donor hidden autotest excludes primary frame work, present, secondary waits, and limiting and cannot establish a cross-engine advantage.
+
+## Implementation evidence
+
+See the Tasks 2–3 integration section of the measurement plan for exact isolated build and private-runtime evidence. Current in-band content/overlay provenance is explicitly unknown; the raw functional capture is inspectable but cannot pass acceptance. Forced loss/not-ready/inactive and indefinite-loading fault cases, authenticated provenance, independent review, and overhead/performance campaigns remain separate gates.

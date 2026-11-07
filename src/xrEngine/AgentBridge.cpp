@@ -7,6 +7,7 @@ CAgentBridge* g_agent_bridge = nullptr;
 
 #include "XR_IOConsole.h"
 #include "IGame_Level.h"
+#include "IGame_Persistent.h"
 #include "xrSim/xrSimBridge.h"
 #include "xrSim/xrSimPackSpawn.h"
 #include "xrScriptEngine/script_engine.hpp"
@@ -243,6 +244,7 @@ void CAgentBridge::HandleRequest(const std::string& line)
         Respond(id, true, "");
         return; // socket thread notices the client closing
     }
+    else if (verb.rfind("perf.", 0) == 0) result = VerbPerf(verb, payload, ok);
     else if (verb == "cmd")   result = VerbCmd(payload, ok);
     else if (verb == "lua")   result = VerbLua(payload, ok);
     else if (verb == "key")   result = VerbKey(payload, ok);
@@ -255,6 +257,67 @@ void CAgentBridge::HandleRequest(const std::string& line)
     else { ok = false; result = "unknown verb: " + verb; }
 
     Respond(id, ok, result);
+}
+
+// All perf controls stay in the existing main-thread OnFrame queue. Loading-only
+// and not-ready loops do not drain it; callers start before loading and stop only
+// once responsive. Stop replies stop_pending; one later explicit status is enough.
+std::string CAgentBridge::VerbPerf(const std::string& verb, const std::string& payload, bool& ok)
+{
+    using namespace xray::frametime;
+    auto& session = Device.FrameTime;
+    FrameTimeMetadata metadata;
+    const auto state = session.Collector().GetStatus().state;
+    if (verb == "perf.start" && state == FrameTimeState::Disabled)
+    {
+#ifndef XR_FRAME_TIME_SOURCE_BUILD
+#define XR_FRAME_TIME_SOURCE_BUILD "unknown"
+#endif
+#ifndef XR_FRAME_TIME_ALLOCATOR
+#define XR_FRAME_TIME_ALLOCATOR "unknown"
+#endif
+        metadata.Set(FrameTimeMetadata::SourceBuild, XR_FRAME_TIME_SOURCE_BUILD);
+        metadata.Set(FrameTimeMetadata::AllocatorBuild, XR_FRAME_TIME_ALLOCATOR);
+        // No authenticated asset inventory is maintained by the engine. Do not
+        // pretend the presence of a staging manifest verifies current assets.
+        char value[128];
+        xr_sprintf(value, "%ux%u", Device.dwWidth, Device.dwHeight);
+        metadata.Set(FrameTimeMetadata::RenderResolution, value);
+        if (SDL_GL_GetCurrentContext())
+        {
+            metadata.Set(FrameTimeMetadata::Renderer, "OpenGL"); // actual current API, not a mutable console token
+            int width=0, height=0;
+            SDL_GL_GetDrawableSize(Device.m_sdlWnd, &width, &height);
+            if (width>0 && height>0)
+            {
+                xr_sprintf(value, "%dx%d", width, height);
+                metadata.Set(FrameTimeMetadata::DrawableResolution, value);
+            }
+            const int interval=SDL_GL_GetSwapInterval();
+            metadata.Set(FrameTimeMetadata::Vsync, interval<0?"adaptive":interval?"on":"off");
+        }
+        extern int ps_fps_limit, ps_fps_limit_in_menu, g_svDedicateServerUpdateReate;
+        const int limit=GEnv.isDedicatedServer?g_svDedicateServerUpdateReate:
+            (Device.Paused() || !g_pGameLevel)?ps_fps_limit_in_menu:ps_fps_limit;
+        if (limit>=0)
+        {
+            xr_sprintf(value, "%u", unsigned(limit));
+            metadata.Set(FrameTimeMetadata::FrameLimit, value);
+        }
+        SDL_version version{};SDL_GetVersion(&version);
+        xr_sprintf(value, "%u.%u.%u", version.major,version.minor,version.patch);
+        metadata.Set(FrameTimeMetadata::SDLVersion, value);
+    }
+    auto result=session.Control(verb.c_str(),payload.c_str(),&metadata);
+    if (result.ok && verb=="perf.export")
+    {
+        string_path path;
+        FS.update_path(path,"$app_data_root$","");
+        convert_path_separators(path);
+        result=session.Export(path);
+    }
+    ok=result.ok;
+    return result.text;
 }
 
 // ---- cmd ----

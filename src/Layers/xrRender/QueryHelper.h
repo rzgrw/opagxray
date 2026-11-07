@@ -77,6 +77,7 @@ IC HRESULT CreateQuery(GLuint* pQuery, D3D_QUERY type)
 
 IC HRESULT GetData(GLuint query, void* pData, u32 DataSize)
 {
+    xray::frametime::FrameTimeScope span(Device.FrameTime, xray::frametime::FrameTimePhase::OcclusionWait);
     if (DataSize == sizeof(GLint64))
         CHK_GL(glGetQueryObjecti64v(query, GL_QUERY_RESULT, (GLint64*)pData));
     else

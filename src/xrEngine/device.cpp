@@ -31,6 +31,7 @@ bool g_bLoaded = false;
 ref_light precache_light = 0;
 
 using namespace xray;
+using namespace xray::frametime;
 
 bool CRenderDevice::RenderBegin()
 {
@@ -44,10 +45,15 @@ bool CRenderDevice::RenderBegin()
     case DeviceState::Normal: break;
     case DeviceState::Lost:
         // If the device was lost, do not render until we get it back
-        Sleep(33);
+        FrameTime.Mark(FrameTimeLoopFlags::DeviceUnavailable);
+        {
+            FrameTimeScope span(FrameTime, FrameTimePhase::DeviceSleep);
+            Sleep(33);
+        }
         return false;
 
     case DeviceState::NeedReset:
+        FrameTime.Mark(FrameTimeLoopFlags::DeviceUnavailable);
         // Check if the device is ready to be reset
         Reset();
         return false;
@@ -164,6 +170,8 @@ bool CRenderDevice::BeforeFrame()
 
     if (!b_is_Ready)
     {
+        FrameTime.Mark(FrameTimeLoopFlags::DeviceUnavailable);
+        FrameTimeScope span(FrameTime, FrameTimePhase::NotReadySleep);
         Sleep(100);
         return false;
     }
@@ -175,8 +183,10 @@ bool CRenderDevice::BeforeFrame()
 
     if (!g_loading_events.empty())
     {
+        FrameTime.Mark(FrameTimeLoopFlags::Loading);
         if (g_loading_events.front()())
             g_loading_events.pop_front();
+        FrameTimeScope span(FrameTime, FrameTimePhase::LoadDraw);
         g_pGamePersistent->LoadDraw();
         return false;
     }
@@ -263,16 +273,31 @@ void CRenderDevice::ProcessFrame()
 {
     ZoneScoped;
 
+    const auto classify = [this]
+    {
+        if (!FrameTime.Running()) return;
+        if (!g_pGameLevel || (g_pGamePersistent && g_pGamePersistent->IsMainMenuActive()))
+            FrameTime.Mark(FrameTimeLoopFlags::Menu);
+        if (Paused()) FrameTime.Mark(FrameTimeLoopFlags::Paused);
+        if (dwPrecacheFrame) FrameTime.Mark(FrameTimeLoopFlags::Precache);
+        if (!b_is_Active) FrameTime.Mark(FrameTimeLoopFlags::Inactive);
+        const auto flags = SDL_GetWindowFlags(m_sdlWnd);
+        if (flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED))
+            FrameTime.Mark(FrameTimeLoopFlags::DeviceUnavailable);
+        FrameTime.ObserveDimensions(dwWidth, dwHeight, false);
+    };
+    classify();
     if (!BeforeFrame())
         return;
 
     const u64 frameStartTime = TimerGlobal.GetElapsed_ms();
 
-    FrameMove();
+    { FrameTimeScope span(FrameTime, FrameTimePhase::Main); FrameMove(); }
 
     if (g_agent_bridge)
         g_agent_bridge->OnFrame();
 
+    classify(); // retain transitions caused by frame callbacks or explicit controls
     OnCameraUpdated();
 
     const auto& processSeqParallel = TaskScheduler->AddTask([this]
@@ -284,9 +309,9 @@ void CRenderDevice::ProcessFrame()
         seqFrameMT.Process();
     });
 
-    DoRender();
+    { FrameTimeScope span(FrameTime, FrameTimePhase::Render); DoRender(); }
 
-    TaskScheduler->Wait(processSeqParallel);
+    { FrameTimeScope span(FrameTime, FrameTimePhase::WorkerWait); TaskScheduler->Wait(processSeqParallel); }
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;
@@ -299,11 +324,20 @@ void CRenderDevice::ProcessFrame()
     else if (Paused() || g_pGameLevel == nullptr)
         updateDelta = 1000 / ps_fps_limit_in_menu;
 
+    if (FrameTime.Running())
+        FrameTime.ObserveFrameLimit(GEnv.isDedicatedServer ? g_svDedicateServerUpdateReate :
+            (Paused() || g_pGameLevel == nullptr) ? ps_fps_limit_in_menu : ps_fps_limit);
     if (frameTime < updateDelta)
+    {
+        FrameTimeScope span(FrameTime, FrameTimePhase::Limiter);
         Sleep(updateDelta - frameTime);
+    }
 
     if (!b_is_Active)
+    {
+        FrameTimeScope span(FrameTime, FrameTimePhase::InactiveSleep);
         Sleep(1);
+    }
 }
 
 void CRenderDevice::ProcessEvent(const SDL_Event& event)
@@ -431,6 +465,12 @@ void CRenderDevice::Run()
 void CRenderDevice::Shutdown()
 {
     ZoneScoped;
+    if (FrameTime.NeedsShutdownWarning())
+    {
+        const auto status = FrameTime.Collector().GetStatus();
+        Msg("~ frame_time: shutdown discards unexported capture stored=%llu dropped=%llu",
+            (unsigned long long)status.stored_loops, (unsigned long long)status.dropped_loops);
+    }
     seqAppEnd.Process();
 }
 

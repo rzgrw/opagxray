@@ -10,6 +10,7 @@
 
 #include "xrCore/FTimer.h"
 #include "Stats.h"
+#include "FrameTimeSession.h"
 #include "xrCommon/xr_list.h"
 #include "xrCore/Threading/Event.hpp"
 #include "xrCore/fastdelegate.h"
@@ -34,6 +35,8 @@ constexpr float HUD_VIEWPORT_NEAR = 0.05f;
 class ENGINE_API CRenderDevice : public IWindowHandler
 {
 public:
+    xray::frametime::CFrameTimeSession FrameTime;
+
     // Main objects used for creating and rendering the 3D scene
     // Real application window resolution
     SDL_Rect m_rcWindowBounds{};

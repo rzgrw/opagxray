@@ -73,6 +73,33 @@ target_include_directories(xrSimAuthoritySpineTests PRIVATE
 )
 target_link_libraries(xrSimAuthoritySpineTests PRIVATE xrSimCore)
 
+# Configure-time source identity includes the telemetry implementation bytes and
+# honestly labels the worktree; it does not claim authenticated runtime assets.
+set(frame_time_identity "${XRAY_GIT_SHA}")
+foreach(source FrameTimeCollector.h FrameTimeCollector.cpp FrameTimeSession.h FrameTimeSession.cpp
+    device.h device.cpp x_ray.cpp AgentBridge.cpp CMakeLists.txt)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${source}" source_hash)
+    string(APPEND frame_time_identity "${source}:${source_hash};")
+endforeach()
+foreach(source Layers/xrRenderGL/glHW.cpp Layers/xrRender/r__sync_point.cpp Layers/xrRender/QueryHelper.h)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/${source}")
+    file(SHA256 "${CMAKE_SOURCE_DIR}/src/${source}" source_hash)
+    string(APPEND frame_time_identity "${source}:${source_hash};")
+endforeach()
+string(SHA256 frame_time_hash "${frame_time_identity}")
+target_compile_definitions(xrEngine PRIVATE
+    XR_FRAME_TIME_SOURCE_BUILD="git:${XRAY_GIT_SHA},telemetry_sha256:${frame_time_hash},config:$<CONFIG>"
+    XR_FRAME_TIME_ALLOCATOR="${MEMORY_ALLOCATOR},$<CONFIG>")
+target_sources(xrEngine PRIVATE FrameTimeCollector.cpp FrameTimeCollector.h FrameTimeSession.cpp FrameTimeSession.h)
+
+if(NOT WIN32)
+    add_executable(xrFrameTimeSessionTests EXCLUDE_FROM_ALL
+        FrameTimeCollector.cpp FrameTimeSession.cpp tests/FrameTimeSessionTests.cpp)
+    target_include_directories(xrFrameTimeSessionTests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+    set_target_properties(xrFrameTimeSessionTests PROPERTIES UNITY_BUILD OFF)
+endif()
+
 add_executable(xrFrameTimeCollectorTests EXCLUDE_FROM_ALL
     FrameTimeCollector.cpp
     tests/FrameTimeCollectorTests.cpp
@@ -91,6 +118,14 @@ target_include_directories(xrFrameTimeCollectorBoundaryTests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/src"
 )
+if(NOT MSVC)
+    target_compile_options(xrFrameTimeCollectorTests PRIVATE -fno-exceptions)
+    target_compile_options(xrFrameTimeCollectorBoundaryTests PRIVATE -fno-exceptions)
+    if(TARGET xrFrameTimeSessionTests)
+        target_compile_options(xrFrameTimeSessionTests PRIVATE -fno-exceptions)
+    endif()
+endif()
+
 
 target_sources_grouped(
     TARGET xrEngine

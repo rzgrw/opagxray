@@ -1,7 +1,7 @@
 # Frame-time measurement implementation plan
 
 **Date:** 2026-11-07
-**Status:** Standalone core/report slice and project-wiring gate verified with project-wide unity ON; runtime instrumentation, export, and overhead gates remain open
+**Status:** Tasks 2–3 implemented with isolated GL build and bounded private-runtime functional evidence; independent review, provenance acceptance, and overhead gates remain open
 **Design:** [Frame-time measurement design](../specs/2026-11-07-frame-time-measurement-design.md)
 
 ## Goal
@@ -24,7 +24,7 @@ Use a `CFrameTimeCollector` owned by `CRenderDevice`, `steady_clock` nanosecond 
 
 - Created `src/xrEngine/FrameTimeCollector.h` and `.cpp`.
 - Created `src/xrEngine/tests/FrameTimeCollectorTests.cpp` and `FrameTimeCollectorBoundaryTests.cpp`, with standalone `xrFrameTimeCollectorTests` and `xrFrameTimeCollectorBoundaryTests` wiring in `src/xrEngine/CMakeLists.txt`.
-- Device ownership remains in Task 2; no engine device source has been modified.
+- `CRenderDevice::FrameTime` now owns the collector through a generation-checked session; runtime hooks and bridge controls are implemented in Tasks 2–3.
 
 **Interfaces:**
 
@@ -47,7 +47,7 @@ Use a `CFrameTimeCollector` owned by `CRenderDevice`, `steady_clock` nanosecond 
 - [x] Reversal, mismatch, underflow, depth, duration and frame-range failures invalidate affected loops and prevent clean acceptance.
 - [x] Loop-sequence exhaustion rejects new records without wrap; drop/invalid diagnostic counters saturate rather than erase history.
 - [x] Disabled calls perform no clock reads, allocations, record writes, or I/O; finalized and stopped records remain immutable.
-- [ ] Bridge export/disconnect and engine shutdown warning behavior remain integration tests.
+- [x] Bridge export, capture persistence across client disconnect, and one-warning/no-export active shutdown verified in the private functional runtime.
 
 ## Task 2: Source instrumentation without behavior changes
 
@@ -55,43 +55,43 @@ Use a `CFrameTimeCollector` owned by `CRenderDevice`, `steady_clock` nanosecond 
 
 - Modify `src/xrEngine/x_ray.cpp`, `device.cpp`, and minimal collector declarations.
 - Modify `src/Layers/xrRenderGL/glHW.cpp` for existing `CHW::Present` only.
-- Modify `src/Layers/xrRender/r__sync_point.cpp` and `r__occlusion.cpp` only around existing waits.
+- Modify `src/Layers/xrRender/r__sync_point.cpp` and the GL `GetData` branch in `QueryHelper.h` around the exact existing waits (the blocking query call lives in the helper).
 
 **Implementation:**
 
-- [ ] Preserve loop quit semantics while placing `BeginLoop` before `SDL_QuitRequested()` and all SDL/window work.
-- [ ] Span `FrameMove`, `DoRender`, `CHW::Present`, scheduler wait, limiter, inactive/not-ready/device sleeps, and `LoadDraw` exactly as the design table specifies.
-- [ ] Record loading/menu/paused/precache/inactive/device-unavailable flags at execution; do not infer occlusion from a later state query.
-- [ ] Measure existing fence and blocking occlusion calls as nested primary-thread CPU waits. Add no GL call or synchronization.
-- [ ] Confirm worker wait is only main-thread blocking time and no worker execution field is introduced.
-- [ ] Confirm all early returns finalize on the next outer boundary and no phase is defaulted to zero.
+- [x] Preserve loop quit semantics while placing `BeginLoop` before `SDL_QuitRequested()` and all SDL/window work.
+- [x] Span `FrameMove`, `DoRender`, `CHW::Present`, scheduler wait, limiter, inactive/not-ready/device sleeps, and `LoadDraw` exactly as the design table specifies.
+- [x] Record loading/menu/paused/precache/inactive/device-unavailable flags at execution; do not infer occlusion from a later state query.
+- [x] Measure existing fence and blocking occlusion calls as nested primary-thread CPU waits. Add no GL call or synchronization.
+- [x] Confirm worker wait is only main-thread blocking time and no worker execution field is introduced.
+- [x] Confirm all early returns finalize on the next outer boundary and no phase is defaulted to zero.
 
 **Focused checks:**
 
-- [ ] Existing collector tests plus a source-level call-order review covering loading, not-ready, inactive, lost/occluded, normal render, and quit.
-- [ ] Build the normal target and focused tests when implementation is authorized; no runtime change is accepted on compilation alone.
+- [x] Existing collector tests plus a source-level call-order review covering loading, not-ready, inactive, lost/occluded, normal render, and quit.
+- [x] Build the normal target and focused tests when implementation is authorized; no runtime change is accepted on compilation alone.
 
 ## Task 3: Bridge control, bounded export, and offline report
 
 **Files:**
 
 - Modify `src/xrEngine/AgentBridge.h` and `.cpp` using existing `OnFrame` request handling.
-- Modify `tools/gl_macos_soak.py` only for control/artifact integration; `tools/agentctl.py` already accepts arbitrary verbs.
-- Created `tools/frame_time_report.py` and `tools/tests/test_frame_time_report.py`; bridge and filesystem export remain unimplemented.
+- Existing `tools/agentctl.py` accepts perf verbs unchanged; the bounded regression driver and exact commands are retained as task artifacts. No per-frame perf polling was added to the soak harness.
+- Existing strict reporter remains unchanged. Added portable `FrameTimeSession` control/export/scopes, a focused CMake test target, and a literal C++ writer/Python parser round-trip suite.
 
 **Implementation:**
 
-- [ ] Add `perf.start [capacity] [warmup_loops]`, `perf.stop`, `perf.status`, `perf.export`, and `perf.reset`; socket-thread behavior and input paths remain unchanged.
-- [ ] Start capture before a load; never move bridge `OnFrame` into loading-only loops. Surface existing command timeout/responsiveness limitations truthfully.
-- [ ] Export only after stopped, below `$app_data_root$/perf/`, using a generated nonoverwriting capture name. On write failure return an error and retain records for retry.
-- [ ] Export metadata and raw integer CSV from the design; no per-frame response or giant socket payload.
+- [x] Add `perf.start [capacity] [warmup_loops]`, `perf.stop`, `perf.status`, `perf.export`, and `perf.reset`; socket-thread behavior and input paths remain unchanged.
+- [x] Start capture before a load; never move bridge `OnFrame` into loading-only loops. Surface existing command timeout/responsiveness limitations truthfully.
+- [x] Export only after stopped, below `$app_data_root$/perf/`, using a generated nonoverwriting capture name. On write failure return an error and retain records for retry.
+- [x] Export metadata and raw integer CSV from the design; no per-frame response or giant socket payload.
 - [x] Implement nearest-rank p50/p95/p99, strict long-frame thresholds, declared scene filters, provenance display, and explicit empty/partial/unprovenanced/complete verdicts; always include both all-loop and steady populations with loop/time bounds, sampled/elapsed duration, phase summaries, flag counts, and combined failure reasons.
 
 **Tests:**
 
 - [x] Independent literal 11-phase core-compatible begin-timestamp fixture, N=20 nearest rank, and strict threshold equality; empty, malformed CSV, nonfinite/invalid, duplicate/missing, uint32/uint64 overflow, retained-envelope, warmup/prefix/capacity accounting, out-of-order, and count/duration-mismatched inputs fail without dropping rows.
 - [x] Accounted invalid-loop holes remain partial diagnostics, including zero-time omitted loops; unexplained gaps, overlap, and reversed recovery envelopes reject even with invalid accounting. One phase call is bounded by wall time; repeated/nested calls are bounded by calls times wall time.
-- [ ] Export failure/retry, socket disconnect, active shutdown, stop during loading, and export before stopped retain truthful state and normal teardown.
+- [x] Export failure/retry and export-before-stopped covered by C++ tests; client disconnect and active shutdown verified live. Capture starts before loading; stop remains queued until existing OnFrame becomes responsive. Indefinite-load timeout/fault injection is still an open follow-up.
 - [x] Reports keep nested CPU phases separate, reject truncated/empty captures for acceptance, and block unknown/unavailable required provenance from acceptance.
 
 ## Task 4: Target-only runtime scenarios
@@ -121,11 +121,11 @@ python3 tools/gl_macos_soak.py \
 
 ### Correctness and lifecycle
 
-- [ ] All focused C++/Python tests pass and the normal target builds.
+- [x] All focused C++/Python tests pass and the normal GL target builds (integration evidence below).
 - [ ] A full-loop record includes present, worker wait, and limiter; loading/not-ready/device sleep cases are labeled, not lost.
 - [ ] No per-frame allocation/I/O/network/sync appears in the implementation review.
-- [ ] Export/stop/shutdown tests pass, including active shutdown without implicit export.
-- [ ] World and menu images are inspected; logs and normal process exit are clean.
+- [x] Export/stop/shutdown tests pass, including active shutdown without implicit export.
+- [x] World/inventory/menu images inspected and normal process exit 0; no GL/fatal/assert markers in the checked runs, with known nonfatal CoC content warnings retained.
 
 ### Overhead
 
@@ -329,6 +329,52 @@ CMake SHA-256 changed from `f23a66ae60ff3f37dcb3e1408285a0f020558025d7f189cdff67
 
 Evidence is under `artifacts/frame-time/task-29dd71aa0257/`: `configure.log`, `build.log`, `verified-compile-commands.txt`, both target-named run logs, `runs.json`, `commands.json`, `target-only-unity.patch`, before/after reviewed hashes and submodule snapshots, and `report.json`. Only the CMake line and this plan were edited outside ignored build/evidence artifacts; no dependency revision change, full engine/game/provider/GUI activity, network, commit, push, PR, merge, or deletion occurred.
 
+### Tasks 2–3 integration and functional evidence (2026-11-07, dispatch ctx_5d6aca12d434)
+
+Implemented from checkpoint `e3f273f04`, without donor code, optimizations, provider calls, or changes to Grok-owned upstream reports. The existing recorder algorithm and strict parser were retained; the collector adds only `DiscardCurrentLoop` for rejected measurement controls, plus DLL visibility declarations. `FrameTimeSession` owns control/export state and a monotonic scope generation; a lock-free enabled branch followed by immutable owner-thread checks makes worker-thread scope calls inert, and stale same-phase scopes cannot close phases after stop/reset/restart or another loop. Disabled hook paths do not read a clock, allocate, format metadata, or perform I/O. Settings observations use fixed integers and sticky unknown bits, not per-frame strings.
+
+The outer boundary precedes `SDL_QuitRequested`; the next boundary finalizes preceding work, including early-return loading/not-ready loops. Existing `FrameMove`, full `DoRender`/Present, scheduler wait, limiter and sleep calls are scoped in place. Existing fence/query calls are timed without adding GL synchronization. The query instrumentation is in `QueryHelper.h`, where the actual blocking GL result reads occur, rather than broadening `r__occlusion.cpp` bookkeeping. Classification occurs before `BeforeFrame` and again after main-thread callbacks/controls; flags are ORed so transitions are retained. Lost/reset handling marks unavailable at the observed branch.
+
+All perf requests remain in existing main-thread bridge `OnFrame`; socket code and its scheduling are unchanged. Start replies armed, stop replies stop_pending, and an explicit status after the next outer boundary reports stopped; no automatic/per-frame perf polling exists. Forbidden active perf requests are rejected and their current loop is invalidated, so control-response overhead cannot become a valid sample. This deliberate discard is counted in `invalid_loops` and blocks acceptance. Loading-only/not-ready loops still cannot service the bridge; the live procedure starts capture before loading and stops after responsiveness returns. No scope is held across bridge dispatch.
+
+Export accepts no client path and uses descriptor-relative `mkdirat/openat`, `O_EXCL`, and `O_NOFOLLOW` beneath appdata/perf, generated process/serial filenames, bounded row streaming, and checked write/flush/close results. It retains the stopped buffer on failure; only its own newly created failed partial file is removed. Repeated successful exports have distinct names. Shutdown never exports implicitly and emits one warning if a capture is unexported. The engine knows current build/renderer/SDL/allocator/presentation values; settings observed changing during capture become sticky unknown. Content/overlay provenance stays explicitly unknown because this engine does not authenticate the current runtime assets from a staging manifest. The external staging manifest and its SHA-256 remain functional-run evidence, not fabricated in-band provenance.
+
+Tests: three real project CMake test targets pass (collector, boundary, session), and the full Python suite passes **64 tests**, including four literal C++ production-writer → strict Python parser/CLI tests. Focused session tests cover active-control rejection, stop-pending, reset/restart, disabled clocks/allocations, worker exclusion, stale same-phase generations, active destruction, export failure/retry, preexisting generated-name collision, symlink refusal, and settings changed then restored. Sanitizer result and final exact hashes/commands are in the task report. Original core/parser tests remain unchanged. No CTest registration is claimed.
+
+Build: fresh isolated arm64 Release, SDK 15.4, deployment 15.0, unity ON, parked renderers OFF, `-j10`, and private executable/library outputs. The initial global `-fno-exceptions` configure inherited from standalone testing hit existing `src/xrCore/_math.cpp:126` try/catch; the documented engine invocation has no such global flag. Removing that extra flag, while preserving Darwin `XRAY_EXCEPTIONS=0`, allowed the full GL engine/game build. The three focused test targets explicitly retain `-fno-exceptions`. No unrelated source patch was made. Existing compiler warnings and the installed SDL2-compat dylib's newer macOS deployment warning are retained in logs.
+
+```bash
+cmake -S /Users/rz/orca/opagxray \
+  -B /Users/rz/orca/opagxray/artifacts/frame-time/task-2287db229386/build \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_UNITY_BUILD=ON -DCPACK_GENERATOR=ZIP \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+  -DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_CXX_FLAGS= \
+  -DXRAY_METAL=OFF -DXRAY_VULKAN=OFF \
+  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE=/Users/rz/orca/opagxray/artifacts/frame-time/task-2287db229386/bin \
+  -DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE=/Users/rz/orca/opagxray/artifacts/frame-time/task-2287db229386/bin
+cmake --build artifacts/frame-time/task-2287db229386/build -j10
+cmake --build artifacts/frame-time/task-2287db229386/build \
+  --target xrFrameTimeCollectorTests xrFrameTimeCollectorBoundaryTests xrFrameTimeSessionTests -j10 --verbose
+python3 -m unittest discover -s tools/tests -v
+```
+
+The stager created `build/runtime/frame-time-2287` from the exact base and patch paths in `docs/macos-dev-setup.md`, with 495 manifest-managed files and target GL overlay. Only this new private config used vsync off; sound stayed initialized with muted volumes. Visible menu → ordinary new-game Rookie/Loner/Rookie Village selection → fresh `l01_escape` → movement → unique `ft2287_private_regression` save/reload → inventory → menu → normal quit passed; world/inventory/menu screenshots were visually inspected outside capture. Position changed from approximately `(-207.9,-22.5,-128.5)` to `(-208.8,-22.5,-128.6)` and was retained after reload. Process exit was 0. Known nonfatal CoC ALife/script and rendering warnings remain visible; no fatal/assert termination occurred.
+
+The start-before-load capture survived explicit client disconnect and contains **992 rows, zero invalid/dropped loops, no truncation**; calls include 26 load-draw, 1,030 present, 961 fence waits and 6,305 query waits. `runtime-capture.csv` parses with the unchanged reporter as **unprovenanced**, for content_manifest/overlay plus the correctly detected menu→game frame-limit transition. It is functional/schema evidence only. A second active capture was discarded at normal quit with exactly one warning (`stored=3 dropped=0`) and no new export. No performance, overhead, steady-scene, or cross-engine claim follows from these samples.
+
+Final source review replaced the initial TLS guard with a lock-free atomic disabled branch and immutable owner-thread ID, avoiding possible lazy native-TLS allocation; both scope begin and end verify ownership. Explicit disabled allocation-count and clock-count checks pass, as do ASan/UBSan and the final three CMake executables. Windows DLL visibility declarations were added for renderer consumers; Windows itself was not built. The exact final binary was then exercised in the same task-private runtime: ready-world movement, unique `ft2287_accepted_final` save/reload, inventory/menu screenshots and normal exit **0** all passed. `accepted-runtime-capture.csv` has **55 rows**, warmup **2**, no invalid/dropped loops and no truncation; its current-source fingerprint is `6249bfcc5c275b869e769402716a6094125ba6e099bcd9745e83518ce9befa17`. The strict report is unprovenanced only for content_manifest/overlay, with actual OpenGL, 1280×720 render/drawable, vsync off, frame limit 501, SDL 2.32.74 and standard/Release allocator metadata. Source fingerprint was recomputed and matched the final CSV. No timing improvement is inferred from this short functional sample.
+
+Intermediate readiness checks are preserved rather than called passes: `ft2287-final-binary-inventory.jpg` was a loading prompt and is not inventory evidence; a later ready check encountered a still-open pause menu, so the harness used normal `main_menu off` and resumed in the same process. The final accepted world/inventory/reload/menu screenshots were all visually inspected and show the outdoor Cordon scene/UI. A separate earlier explicit stop-during-loading request waited about 3.58 seconds for existing OnFrame responsiveness, then exported 16 valid diagnostic rows. Indefinite-load timeout/fault injection remains untested. The user's observation, **“it feels way more smooth,”** is recorded as subjective feedback under this private vsync-off configuration, not a measured regression/overhead conclusion.
+
+Evidence root: `artifacts/frame-time/task-2287db229386/`, including configure/build/focused/sanitizer/Python logs, final source/binary hashes and review diff, raw CSV and parser JSON, staging manifest, bridge transcripts, regression driver, copied screenshots/logs, and report. Remaining: independent review of the integration delta; authenticated in-band content/overlay provenance before acceptance; explicit indefinite-loading timeout and forced not-ready/inactive/device-loss branch exercise; full-loop overhead reference, five-run performance campaign, and donor equivalence. No commit/push/merge was performed; coordinator owns the checkpoint.
+
 ## Deliverable
 
-A standalone collector core and strict offline reporter with focused evidence. Device/loop/GL instrumentation, bridge/filesystem export, the external overhead reference, runtime acceptance, and donor equivalence remain pending; this slice does not claim a performance improvement or complete the telemetry milestone.
+A collector, runtime loop/GL instrumentation, safe stopped-only bridge export, and strict offline reporter with focused and bounded private-runtime functional evidence. Authenticated provenance acceptance, the external overhead reference, performance campaign, and donor equivalence remain pending; this slice claims no performance improvement.
+
+### Integration checkpoint review (2026-11-07)
+
+Two independent Grok reviews approved the exact Tasks 2–3 source snapshot: bridge/session/export review `ctx_4f71f11ccd75` and loop/phase review `ctx_eb6a7ef8a6ad`. Coordinator verification matched all 17 source hashes and all five runtime binary hashes in `artifacts/frame-time/task-2287db229386/report.json`, ran the three built CMake executables successfully, and reran all 64 Python tests successfully. This closes independent integration review, not performance acceptance.
+
+Nonblocking classification limitations remain: not-ready loops also set device-unavailable, and Cocoa occlusion is observed through RenderBegin rather than on loading/not-ready early-return paths. These require explicit classification handling before filtered benchmark acceptance. The earlier injected-clock high-water limitation remains diagnostic-only and rejected by strict parsing. The 55-row runtime export is functional evidence and correctly remains unprovenanced; verified asset/overlay provenance, fault branches, overhead reference, repeated performance measurements and donor equivalence remain open. Binary hashes were checked at their actual isolated artifact bin paths, not in the staged content runtime.

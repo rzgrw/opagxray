@@ -5,6 +5,13 @@
 #include <cstdint>
 #include <new>
 
+// Standalone tests have no engine DLL API; runtime modules share these symbols.
+#if defined(_WIN32) && defined(ENGINE_API)
+#   define XR_FRAME_TIME_API ENGINE_API
+#else
+#   define XR_FRAME_TIME_API
+#endif
+
 namespace xray::frametime
 {
 enum class FrameTimeState : uint8_t
@@ -109,7 +116,7 @@ struct FrameTimeStatus
     bool truncated = false;
 };
 
-class CFrameTimeCollector
+class XR_FRAME_TIME_API CFrameTimeCollector
 {
 public:
     static constexpr size_t DefaultCapacity = 32768;
@@ -131,6 +138,9 @@ public:
     FrameTimeResult Start(size_t capacity = DefaultCapacity, uint32_t warmup_loops = 0);
     FrameTimeResult Stop();
     FrameTimeResult Reset();
+    // Reject a loop contaminated by a forbidden measurement-control request.
+    // Account it at the next boundary; preserve the capture and retained rows.
+    void DiscardCurrentLoop();
 
     FrameTimeResult BeginLoop();
     FrameTimeResult BeginLoopAt(uint64_t start_ns);

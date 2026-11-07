@@ -137,6 +137,12 @@ FrameTimeResult CFrameTimeCollector::BeginLoop()
     return BeginLoopAt(Now());
 }
 
+void CFrameTimeCollector::DiscardCurrentLoop()
+{
+    if (m_have_previous && (m_state == FrameTimeState::Capturing || m_state == FrameTimeState::Saturated))
+        m_current_valid = false;
+}
+
 FrameTimeResult CFrameTimeCollector::BeginLoopAt(uint64_t start_ns)
 {
     if (m_state == FrameTimeState::Disabled || m_state == FrameTimeState::Stopped)

@@ -378,8 +378,11 @@ int CApplication::Run()
     HideSplash();
     Device.Run();
 
-    while (!SDL_QuitRequested()) // SDL_PumpEvents is here
+    for (;;)
     {
+        Device.FrameTime.BeginLoop(Device.dwFrame); // before SDL_PumpEvents and all window work
+        if (SDL_QuitRequested())
+            break;
         FrameMarkStart(FRAME_MARK_APPLICATION_RUN);
         bool canCallActivate = false;
         bool shouldActivate = false;
@@ -442,8 +445,9 @@ int CApplication::Run()
         Device.ProcessFrame();
 
         UpdateDiscordStatus();
+        Device.FrameTime.EndLoop(Device.dwFrame);
         FrameMarkEnd(FRAME_MARK_APPLICATION_RUN);
-    } // while (!SDL_QuitRequested())
+    } // complete outer application loops
 
     Device.Shutdown();
 

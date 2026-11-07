@@ -31,6 +31,7 @@ private:
     void Respond(const std::string& id, bool ok, const std::string& payload);
 
     // verb handlers (main thread)
+    std::string VerbPerf(const std::string& verb, const std::string& payload, bool& ok);
     std::string VerbCmd(const std::string& payload, bool& ok);
     std::string VerbLua(const std::string& payload, bool& ok);
     std::string VerbKey(const std::string& payload, bool& ok);

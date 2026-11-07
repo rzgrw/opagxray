@@ -40,6 +40,8 @@ void UpdateVSync()
     {
         SDL_GL_SetSwapInterval(0);
     }
+    if (Device.FrameTime.Running())
+        Device.FrameTime.ObserveVsync(SDL_GL_GetSwapInterval());
 }
 
 CHW::CHW()
@@ -244,6 +246,7 @@ void CHW::EndScene() { }
 
 void CHW::Present()
 {
+    xray::frametime::FrameTimeScope span(Device.FrameTime, xray::frametime::FrameTimePhase::Present);
     // Surface GL errors raised during the frame close to where they happened.
     // CHK_GL is compiled out in Release, so without this drain errors pool in
     // the queue and get blamed on unrelated code (e.g. the next texture load).
@@ -267,6 +270,7 @@ void CHW::Present()
     // Blit with aspect preservation into whatever the drawable really is.
     int drawableW = int(Device.dwWidth), drawableH = int(Device.dwHeight);
     SDL_GL_GetDrawableSize(m_window, &drawableW, &drawableH);
+    Device.FrameTime.ObserveDimensions(drawableW, drawableH, true);
 
     int dstX = 0, dstY = 0, dstW = drawableW, dstH = drawableH;
     if (drawableW != int(Device.dwWidth) || drawableH != int(Device.dwHeight))
