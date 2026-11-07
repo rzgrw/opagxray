@@ -2,11 +2,13 @@
 
 ## Project Overview
 
-**Windows continuation:** read [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) first when restoring the 2026-11-07 transfer. The Windows bridge/export and current build inventories need validation; Mac acceptance is not Windows acceptance.
+**Windows continuation:** read [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) first when restoring the 2026-11-07 transfer. Toolchain, build route, assets and bridge gaps: [docs/windows-dev-setup.md](docs/windows-dev-setup.md). The Windows bridge/export and current build inventories need validation; Mac acceptance is not Windows acceptance.
 
-OpenXVibeRay is a fork of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The original engine is **inspiration and foundation, not scripture**. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision.
+OpenXVibeRay is a **detached fork** of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The original engine is **inspiration and foundation, not scripture**. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision. The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray); there is no PR flow upstream.
 
-- **Runtime:** OpenGL is the working baseline and **stability and frame-time consistency are the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953`, Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
+- **Branches:** `main` (stable, `950a7820b`) moves only by fast-forward from `dev` after a recorded gate; `dev` is experimental integration. Feature work uses short-lived branches that are merged then deleted, or archived as `archive/<name>` tags (recover with `git fetch origin tag archive/<name>` then `git switch -c <x> archive/<name>`).
+
+- **Runtime:** OpenGL is the working baseline and **stability and frame-time consistency are the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953` (tag `archive/feat/metal-mr1-ingame`), Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
 - **AI:** xrSim foundation, HTTP transport, thin actor harness, session packs, and async actor wakes are shipped. Gate 1 Task 1 canonical state is integrated at `04b4ef5b5`; further AI expansion follows the runtime comparison. Gate 1 is not complete. See the inventory before restarting old plans.
 - **Agent bridge (shipped):** launch with `-agent_bridge`, drive via `tools/agentctl.py` — Codex can run, control, and screenshot the game itself. This is the standard verification harness.
 
@@ -85,6 +87,6 @@ Verbs: `hello/cmd/lua/key/mouse/state/shot/bye`. A private-save scenario coverin
 
 - **Baseline:** `dev` at `8984220b6` includes the IXRay foundation guards, UI comparator, private stager, and frame-wait harness.
 - **Evidence:** 41 Python tests, two C++ targets, and the vsync-off Cordon gate are historical records; the original ignored artifacts/worktree are absent. They are not current reruns.
-- **Recovery:** unmerged Gate 1 branch `1d951aa07` is partial recovery material; Task 1 is integrated at `04b4ef5b5`. Authority and strict codec/atomic commit remain queued behind the stability/performance comparison.
+- **Recovery:** unmerged Gate 1 source `1d951aa07` (tag `archive/codex/ai-authority-spine-gate1`) is partial recovery material; Task 1 is integrated at `04b4ef5b5`. Authority and strict codec/atomic commit remain queued behind the stability/performance comparison.
 - **Open acceptance:** hardened live non-coast prompt, current private packs, five-run GL/20-minute idle, direct empty-group path, and sustained vsync-on gameplay; Gate 1 has further replay/soak/live gates.
 - **Provider policy:** `claude-sonnet-5` is a historical value requiring official availability verification before live use; this reconciliation approves no provider/model substitution.

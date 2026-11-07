@@ -7,7 +7,8 @@ Current execution is moving to Windows. Read [WINDOWS_HANDOFF.md](WINDOWS_HANDOF
 ## Repository and branch policy — 2026-11-07
 
 - The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray), now **detached** from OpenXRay's GitHub fork network. This supersedes the earlier "no GitHub detachment has occurred" wording here and in the handoff. OpenXRay and IXRay remain inspiration and selective donors: no PR flow upstream, upstream intake only as reviewed, attributed, license-compatible changes.
-- Only two long-lived branches: `main` (stable; `<main-sha TBD>`, not yet created) and `dev` (experimental; all work lands here first). Other branches (`codex/*`, `feat/metal-*`, `rzgrw/frame-overhead-*`, `transfer/windows-2026-11-07`) are being archived/removed; SHAs cited below for them are historical recovery references, not merge candidates.
+- Only two long-lived branches. `main` is stable (GitHub default; `950a7820b` on 2026-11-07) and moves only by fast-forward from `dev` after a recorded gate. `dev` is experimental integration. Feature work uses short-lived branches that are merged then deleted, or archived as annotated tags.
+- Archive tags created by the 2026-11-07 cleanup (recover with `git fetch origin tag archive/<name>`, then `git switch -c <x> archive/<name>`): `archive/codex/ai-authority-spine-gate1` → `1d951aa07`; `archive/feat/metal-mr1-ingame` → `caa2e4953`; `archive/rzgrw/frame-overhead-base` → `617957470`; `archive/rzgrw/frame-overhead-reference` → `d603c01d2`; `archive/transfer/windows-2026-11-07` → `d336361d1` (only copy of the `docs/transfer/2026-11-07/` evidence and provenance WIP `8cf2af572`). `codex/ai-snapshot-replay` (patch on `dev` as `99ebfb8b5`), `codex/ai-zone-foundation` and `feat/metal-mr0-first-frame` (ancestors of `dev`) were deleted without tags. Tag `sp1-macos-baseline` is kept. None of the archived tips is a merge candidate.
 
 Reconciled against local `dev` at `950a7820b` (2026-11-07 doc refresh; earlier
 inventory baseline was `8984220b6`). Git refs and source presence were checked,
@@ -49,17 +50,17 @@ history rather than instructions to replay every commit.
 | [Thin actor harness](superpowers/plans/2026-07-07-llm-thin-harness-ai.md) | Shipped: `b38c943fb`…`589be8ff9`; intent codec, actors, actuator command ledger, runtime and bridge. |
 | [Session mutant packs](superpowers/plans/2026-07-08-mutant-pack-session-spawn.md) | Shipped: `a374e6bc9`, `558f73348`, `0e494f6a9`, observability fix `ccd8713b8`; registry/spawn seam, not complete live AI ownership. |
 | [Async actor provider](superpowers/plans/2026-07-14-async-live-actor-provider.md) | Shipped: `9cf56d00c`, `e19a9a47d`, `f66aafd34`, contract hardening `96142b7c0`; fresh hardened-prompt non-coast acceptance still open. |
-| [Frame-time measurement](superpowers/plans/2026-11-07-frame-time-measurement.md) | Shipped infrastructure: recorder/reports `e3f273f04`, opt-in GL telemetry + `perf.*` bridge export `a389540d8`, readiness/visibility classification `456808010`, provenance sidecars `90c6e57e6`. No accepted capture or measured gain; Windows export unavailable. Overhead experiment is WIP outside `dev`. |
+| [Frame-time measurement](superpowers/plans/2026-11-07-frame-time-measurement.md) | Shipped infrastructure: recorder/reports `e3f273f04`, opt-in GL telemetry + `perf.*` bridge export `a389540d8`, readiness/visibility classification `456808010`, provenance sidecars `90c6e57e6`. No accepted capture or measured gain; Windows export unavailable. Overhead experiment is WIP in the `archive/rzgrw/frame-overhead-*` tags. |
 | Menu reload repair | Shipped: `604fb0690` (failure ownership, activation-effect restore, `xrMainMenuReloadTests`). Recorded macOS focused/sanitizer tests and two private live saved-load lifecycles; root cause of the wrong factory type unknown; Windows unverified. |
-| [Metal SP2](superpowers/plans/2026-03-29-sp2-metal-renderer.md) | M-R0/menu shipped (`1ed42b1f1`, merge `4dba4ecd1`); M-R1 parked at unmerged `caa2e4953`. Resume details in [HANDOVER](HANDOVER.md). |
+| [Metal SP2](superpowers/plans/2026-03-29-sp2-metal-renderer.md) | M-R0/menu shipped (`1ed42b1f1`, merge `4dba4ecd1`); M-R1 parked at unmerged `caa2e4953` (tag `archive/feat/metal-mr1-ingame`). Resume details in [HANDOVER](HANDOVER.md). |
 | [Vulkan](superpowers/specs/2026-07-05-vulkan-renderer-roadmap.md) | Not started; native-renderer work paused. Metal on Mac / Vulkan on PC remains the long-term direction. |
 | [Gate 1 authority spine](superpowers/plans/2026-07-14-garbage-ai-authority-spine.md) | Task 1 selectively recovered and integrated at `04b4ef5b5` after independent review. Tasks 2 onward are not integrated; further AI expansion follows the runtime comparison. |
 | [Old roadmap](superpowers/specs/2026-07-04-engine-v2-roadmap.md), [deterministic Zone](superpowers/specs/2026-07-05-zone-simulation-design.md), [streaming](superpowers/specs/2026-07-05-seamless-zone-streaming-design.md), [continuation](superpowers/CONTINUATION.md) | Superseded or parked; retain historical research and surviving invariants, not their execution order. |
 
 ## Gate 1 recovery and remaining gates
 
-`origin/codex/ai-authority-spine-gate1` locally resolves to `1d951aa07` and is
-**unmerged** (the branch is being archived under the branch policy; recover by SHA). It contains partial Tasks 1–10 from `facec9eb9` / `3cf0a8543` plus
+Tag `archive/codex/ai-authority-spine-gate1` (the former branch) resolves to `1d951aa07` and is
+**unmerged**. It contains partial Tasks 1–10 from `facec9eb9` / `3cf0a8543` plus
 the standalone test seam at `1d951aa07`. This is recovery material, not a branch
 ready to merge or proof that all tasks are executable as written. The separate
 `f1222d148` reanimation document's Gemini/model/version-ladder changes are

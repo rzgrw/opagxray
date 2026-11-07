@@ -1,6 +1,6 @@
 # Viberay macOS Native Port with Metal Renderer — Design Spec
 
-> **PARKED (2026-11-07).** Metal remains the long-term Mac backend; M-R0/menu shipped, M-R1 is parked at unmerged `caa2e4953`. AI on GL is current. See [PLAN_STATUS](../../PLAN_STATUS.md); historical design below is not the active execution sequence.
+> **PARKED (2026-11-07).** Metal remains the long-term Mac backend; M-R0/menu shipped, M-R1 is parked at unmerged `caa2e4953` (tag `archive/feat/metal-mr1-ingame`). AI on GL is current. See [PLAN_STATUS](../../PLAN_STATUS.md); historical design below is not the active execution sequence.
 
 **Date:** 2026-03-29
 **Status:** Draft

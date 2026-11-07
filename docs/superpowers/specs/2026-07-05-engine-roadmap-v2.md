@@ -20,11 +20,11 @@ A platform-agnostic rebuild of the X-Ray engine with **DUAL-NATIVE renderers** (
 |---|---|
 | OpenGL / foundation | Working runtime; `8984220b6` ships empty-group guards, UI comparator, private CoC staging, and frame-wait/menu sequencing. Historical gate evidence is recorded, not rerun; original ignored artifacts/worktree are absent. |
 | Agent bridge | Shipped; verification uses explicit private runtime paths from [macOS setup](../../macos-dev-setup.md). |
-| Metal | M-R0/menu shipped; M-R1 parked at unmerged `caa2e4953`. Native-renderer work paused. |
+| Metal | M-R0/menu shipped; M-R1 parked at unmerged `caa2e4953` (tag `archive/feat/metal-mr1-ingame`). Native-renderer work paused. |
 | Vulkan | Not started; long-term Linux/Windows renderer, MoltenVK only a development vehicle. |
 | AI on GL | Foundation, HTTP, thin actor harness, packs, async actor wakes and Gate 1 Task 1 canonical state (`04b4ef5b5`) shipped. Further AI expansion follows the current runtime stability/performance comparison; Gate 1 incomplete. |
 
-The unmerged Gate 1 source at `1d951aa07` requires selective recovery and contract
+The unmerged Gate 1 source at `1d951aa07` (tag `archive/codex/ai-authority-spine-gate1`) requires selective recovery and contract
 reconciliation, not a wholesale merge. The `f1222d148` Gemini/model/version-ladder
 reanimation is **proposed, not approved**. `claude-sonnet-5` remains a historical
 plan value requiring official availability verification before live use.

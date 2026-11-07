@@ -1,6 +1,6 @@
 # Full-Zone AI Authority Spine — Design Spec
 
-> **Status reconciliation (2026-11-07):** DESIGN APPROVED; GATE 1 INCOMPLETE. Selective Task 1 recovery is integrated at `04b4ef5b5`; further AI expansion follows the runtime stability/performance comparison; old branch `1d951aa07` is unmerged recovery material. Task 3 grammar/ownership/semantics need reconciliation before implementation. Sonnet-only policy remains; historical `claude-sonnet-5` requires official availability verification, and `f1222d148` provider/version-ladder changes are proposed only. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+> **Status reconciliation (2026-11-07):** DESIGN APPROVED; GATE 1 INCOMPLETE. Selective Task 1 recovery is integrated at `04b4ef5b5`; further AI expansion follows the runtime stability/performance comparison; old branch `1d951aa07` (tag `archive/codex/ai-authority-spine-gate1`) is unmerged recovery material. Task 3 grammar/ownership/semantics need reconciliation before implementation. Sonnet-only policy remains; historical `claude-sonnet-5` requires official availability verification, and `f1222d148` provider/version-ladder changes are proposed only. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
 
 **Date:** 2026-07-14
 

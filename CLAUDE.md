@@ -4,10 +4,10 @@
 
 OpenXVibeRay is a **detached fork** of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray) and is no longer in OpenXRay's GitHub fork network. OpenXRay (and IXRay) are **inspiration and foundation, not scripture**: there is no PR flow upstream; selective, reviewed intake of upstream fixes stays allowed with license notices preserved. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision.
 
-- **Branches:** only `main` (stable; `<main-sha TBD>`) and `dev` (experimental; work lands here). Other branches are archived/removed — never base new work on them. Commit/push only when asked.
-- **Platform:** development is moving from macOS to **Windows 11**. Mac results are historical Mac evidence; the Windows build, bridge, and runtime are not yet verified — start from [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md).
+- **Branches:** `main` is stable (`950a7820b` as of 2026-11-07; GitHub default) and moves only by fast-forward from `dev` after a recorded gate; `dev` is experimental integration. Feature work goes on short-lived branches that are merged then deleted, or archived as `archive/<name>` tags (`git fetch origin tag archive/<name>`, then `git switch -c <x> archive/<name>`). Commit/push only when asked.
+- **Platform:** development is moving from macOS to **Windows 11**. Mac results are historical Mac evidence; the Windows build, bridge, and runtime are not yet verified — start from [docs/windows-dev-setup.md](docs/windows-dev-setup.md) and [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md).
 
-- **Runtime:** OpenGL is the working baseline and **stability and frame-time consistency are the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953`, Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
+- **Runtime:** OpenGL is the working baseline and **stability and frame-time consistency are the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953` (tag `archive/feat/metal-mr1-ingame`), Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
 - **AI:** xrSim foundation, HTTP transport, thin actor harness, session packs, and async actor wakes are shipped. Gate 1 Task 1 canonical state is integrated at `04b4ef5b5`; further AI expansion follows the runtime comparison. Gate 1 is not complete. See the inventory before restarting old plans.
 - **Agent bridge (shipped, POSIX only):** launch with `-agent_bridge`, drive via `tools/agentctl.py` — Claude can run, control, and screenshot the game itself. This is the standard verification harness on macOS/Linux; the Windows branch of `AgentBridge.cpp` is a stub (Unix socket only), so a Windows control transport is open work.
 - **Frame-time telemetry (shipped, opt-in):** `FrameTimeCollector`/`FrameTimeSession`, bridge verbs `perf.start/stop/reset/status/export`, `tools/frame_time_report.py`, and `tools/frame_time_provenance.py` sidecars. Measurement infrastructure only — no performance gain has been measured. Export returns `export_unavailable` on Windows.
@@ -38,7 +38,7 @@ tools/                       # agentctl.py + bridge soak/acceptance scripts
 
 ## Build (Windows)
 
-Not yet verified on current `dev`. Follow [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md): the CI recipe is VS 2022/MSBuild on `src/engine.sln`, but checked-in `.vcxproj` files lack CMake-only sources added by this fork (`xrEngine.vcxproj` lists no `AgentBridge`, `xrSim`, or `FrameTime*` files) and Windows CMake CI is commented out — pick and fix one route deliberately. Rebuild all engine/game modules together (`IGame_Level`/`MainMenu` layouts changed).
+Unverified — no one has built current `dev` on Windows yet. Toolchain, submodules, recommended CMake+Ninja route, assets and bridge gaps: [docs/windows-dev-setup.md](docs/windows-dev-setup.md). The `src/engine.sln` MSBuild route lacks this fork's CMake-only sources. Never mix stock CoC `bin/` DLLs with repo-built modules.
 
 ## Build (macOS)
 
@@ -85,7 +85,8 @@ Verbs: `hello/cmd/lua/key/mouse/state/shot/bye`. A private-save scenario coverin
 - [docs/HANDOVER.md](docs/HANDOVER.md) — runtime/AI context and parked Metal resume guide.
 - [Engine roadmap v2](docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md) — long-term vision; renderer-first execution order is superseded.
 - [Authority spine](docs/superpowers/specs/2026-07-14-full-zone-ai-authority-spine-design.md) and [thin harness](docs/superpowers/specs/2026-07-07-llm-thin-harness-ai-design.md) refine the original agentic-Zone design.
-- [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) — Windows transfer, build reality, platform gaps, next-session order; read before Windows work.
+- [docs/windows-dev-setup.md](docs/windows-dev-setup.md) — Windows toolchain, build route, assets, and bridge gaps (audited 2026-11-07).
+- [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) — Windows transfer context, archive-tag recovery, next-session order.
 - [macOS setup](docs/macos-dev-setup.md) — private runtime staging and explicit build/run/test paths.
 - [Frame-time plan](docs/superpowers/plans/2026-11-07-frame-time-measurement.md) and the [OpenXRay performance](docs/OPENXRAY_PERFORMANCE_AUDIT_2026-11-07.md) / [physics](docs/OPENXRAY_PHYSICS_PERFORMANCE_AUDIT_2026-11-07.md) audits — current runtime track.
 
@@ -93,6 +94,6 @@ Verbs: `hello/cmd/lua/key/mouse/state/shot/bye`. A private-save scenario coverin
 
 - **Baseline:** `dev` at `950a7820b` (before this doc refresh). Since foundation `8984220b6`: Gate 1 Task 1 canonical state `04b4ef5b5`; frame-time recorder/reports `e3f273f04`; opt-in GL telemetry + bridge export `a389540d8`; frame readiness/window-visibility classification `456808010`; provenance sidecars `90c6e57e6`; menu reload failure-ownership fix `604fb0690`; Windows handoff `950a7820b`.
 - **Evidence:** recorded test/build/live runs for these commits are macOS-only historical records (see PLAN_STATUS); nothing has been rerun on Windows. Telemetry captures still fail asset-provenance acceptance; no speedup is claimed.
-- **Recovery:** unmerged Gate 1 branch `1d951aa07` is partial recovery material; authority and strict codec/atomic commit remain queued behind the stability/performance comparison. Frame-overhead WIP (`rzgrw/frame-overhead-base`/`-reference`) is recovered selectively, never merged wholesale. These refs are subject to the branch archival above.
+- **Recovery:** unmerged Gate 1 source `1d951aa07` (tag `archive/codex/ai-authority-spine-gate1`) is partial recovery material; authority and strict codec/atomic commit remain queued behind the stability/performance comparison. Frame-overhead WIP (tags `archive/rzgrw/frame-overhead-base` / `-reference`) and the transfer evidence/provenance WIP (tag `archive/transfer/windows-2026-11-07`) are recovered selectively, never merged wholesale.
 - **Open acceptance:** consistent Windows x64 build plus Windows bridge/export seams; hardened live non-coast prompt, current private packs, five-run GL/20-minute idle, direct empty-group path, sustained vsync-on gameplay; overhead reference and repeated performance captures; Gate 1 replay/soak/live gates.
 - **Provider policy:** `claude-sonnet-5` (still the source default in `xrSimAgentProvider.h`) is a historical value requiring official availability verification before live use; no provider/model substitution is approved.

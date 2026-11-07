@@ -25,17 +25,18 @@ Original AI design (refined by the thin-harness and authority-spine specs linked
 
 ## 1. Repo state & branches
 
-**Branch policy:** only `main` (stable; `<main-sha TBD>`, not yet created) and `dev` (experimental; all work lands here). Every other branch is being archived/removed; the refs below are historical recovery points, cited by SHA.
+**Branch policy:** `main` is stable (GitHub default) and moves only by fast-forward from `dev` after a recorded gate; `dev` is experimental integration. Feature work goes on short-lived branches that are merged then deleted, or archived as annotated `archive/<name>` tags. Recover an archived tip with `git fetch origin tag archive/<name>` and `git switch -c <x> archive/<name>`.
 
 | Ref | State | Notes |
 |---|---|---|
-| `dev` | `950a7820b`; M-R0, AI harness, IXRay foundation, Task 1, frame-time telemetry/provenance, menu reload repair, Windows handoff | the only working branch |
-| `main` | `<main-sha TBD>` | stable line; not yet created |
-| `1d951aa07` (was `codex/ai-authority-spine-gate1`) | unmerged recovery source | partial Tasks 1–10; not ready to merge, no Gate 1 completion claim |
+| `main` | `950a7820b` (2026-11-07) | stable; GitHub default branch |
+| `dev` | started at `950a7820b`; later commits are docs-only so far | experimental integration: M-R0, AI harness, IXRay foundation, Task 1, frame-time telemetry/provenance, menu reload repair, Windows handoff |
+| tag `archive/codex/ai-authority-spine-gate1` → `1d951aa07` | unmerged recovery source | partial Tasks 1–10; not ready to merge, no Gate 1 completion claim |
 | Task 1 canonical state | integrated at `04b4ef5b5` | independently reviewed and tested; authority/commit remain queued after the runtime comparison |
-| `feat/metal-mr0-first-frame` | **merged to dev** via PR #9 (repository was then named `OpenXVibeRay`) | Metal renders the CoC main menu. GL/DX11 untouched. |
-| `caa2e4953` (was `feat/metal-mr1-ingame`) | WIP, **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. Branched off the pre-merge M-R0 tip — rebase onto current `dev` when resuming. |
-| `rzgrw/frame-overhead-base` / `-reference` | WIP experiments | recover selectively per [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md); never merge wholesale |
+| `feat/metal-mr0-first-frame` (historical, deleted) | **merged to dev** via PR #9 (repository was then named `OpenXVibeRay`) | Metal renders the CoC main menu. GL/DX11 untouched. |
+| tag `archive/feat/metal-mr1-ingame` → `caa2e4953` | WIP, **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. Branched off the pre-merge M-R0 tip — rebase onto current `dev` when resuming. |
+| tags `archive/rzgrw/frame-overhead-base` → `617957470`, `archive/rzgrw/frame-overhead-reference` → `d603c01d2` | WIP experiments | recover selectively per [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md); never merge wholesale |
+| tag `archive/transfer/windows-2026-11-07` → `d336361d1` | transfer snapshot | only copy of `docs/transfer/2026-11-07/` evidence and provenance WIP `8cf2af572`; recover selectively |
 
 All Metal changes are `USE_METAL`/`SM_METAL`-gated, so **GL and DX11 output is unchanged** on every branch.
 
@@ -43,7 +44,7 @@ All Metal changes are `USE_METAL`/`SM_METAL`-gated, so **GL and DX11 output is u
 
 ## 2. Build
 
-Windows 11 (current development machine): **not yet verified** on current `dev`. See [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md#windows-build-reality-and-first-checks). The MSBuild `src/engine.sln` route lacks this fork's CMake-only sources (`xrEngine.vcxproj` lists no `AgentBridge`, `xrSim`, or `FrameTime*` files) and the Windows CMake CI entries are commented out. Rebuild all engine/game modules together; `IGame_Level`/`MainMenu` layouts changed in `604fb0690`.
+Windows 11 (current development machine): **not yet verified** on current `dev`. Follow [windows-dev-setup.md](windows-dev-setup.md) (toolchain, submodules, recommended CMake + Ninja route, assets, bridge gap). The MSBuild `src/engine.sln` route lacks this fork's CMake-only sources (`xrEngine.vcxproj` lists no `AgentBridge`, `xrSim`, or `FrameTime*` files) and the Windows CMake CI entries are commented out. Rebuild all engine/game modules together; `IGame_Level`/`MainMenu` layouts changed in `604fb0690`.
 
 macOS (Apple Silicon):
 
@@ -119,7 +120,7 @@ not establish image correctness: inspect world, inventory, and menu captures.
 
 ## 4. Metal M-R1 resume guide (parked — read only if resuming the renderer)
 
-**Status:** menu renders perfectly on Metal; in-game the **gbuffer geometry pass works** (rt_Position holds the full scene) but the **deferred lighting/combine chain produces a magenta frame**. Foundation is committed on `feat/metal-mr1-ingame`.
+**Status:** menu renders perfectly on Metal; in-game the **gbuffer geometry pass works** (rt_Position holds the full scene) but the **deferred lighting/combine chain produces a magenta frame**. Foundation is committed at `caa2e4953`, preserved as tag `archive/feat/metal-mr1-ingame` (the branch was deleted).
 
 ### 4.1 What already landed (all correct, verified)
 - **Default sampler** bound with every texture (`metalHW.*`, `metalR_Backend_Runtime.h`). Unbound samplers are UB on Metal and were corrupting all textured draws.
@@ -161,7 +162,7 @@ Because GL already runs the full game, the AI work does **not** need the rendere
 
 ### 5.1 xrSim foundation checkpoint
 
-The first AI substrate began on `codex/ai-zone-foundation`; the provider/actor continuation is now included in the reconciled `dev` baseline. `src/xrEngine/xrSim/` contains a deterministic coarse `WorldState`, stable index+generation handles, clamped `adjust_population`, an append-only tool log, actor intent validation, and the provider handoff. The C++ substrate remains replayable even though live model output is not deterministic.
+The first AI substrate began on the historical `codex/ai-zone-foundation` branch (deleted; fully contained in `dev`); the provider/actor continuation is now included in the reconciled `dev` baseline. `src/xrEngine/xrSim/` contains a deterministic coarse `WorldState`, stable index+generation handles, clamped `adjust_population`, an append-only tool log, actor intent validation, and the provider handoff. The C++ substrate remains replayable even though live model output is not deterministic.
 
 Debug bridge verbs are available in `-agent_bridge` sessions:
 
@@ -235,6 +236,7 @@ Current boundary / next AI milestone:
 
 ## 7. Where the detailed context lives
 - Current inventory and recovery gates: [PLAN_STATUS.md](PLAN_STATUS.md)
+- Windows setup audit: [windows-dev-setup.md](windows-dev-setup.md)
 - Windows transfer and next-session order: [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md)
 - Roadmap / vision: `docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md`
 - AI design: `docs/superpowers/specs/2026-07-05-agentic-zone-design.md`

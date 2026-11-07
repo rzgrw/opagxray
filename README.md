@@ -8,7 +8,7 @@ This is an engine project. It does not include S.T.A.L.K.E.R. game data, assets,
 
 - Home: [github.com/rzgrw/opagxray](https://github.com/rzgrw/opagxray). It is no longer a member of OpenXRay's GitHub fork network.
 - Upstream relationship: OpenXRay (and IXRay) are inspiration and selective donors. There is no PR flow upstream; upstream fixes are taken in individually, reviewed, attributed, and with license notices preserved.
-- Branches: `main` is stable (`<main-sha TBD>`, not yet created); `dev` is experimental and receives all new work. No other long-lived branches.
+- Branches: `main` is stable (the default branch; `950a7820b` as of 2026-11-07) and moves only by fast-forward from `dev` after a recorded gate. `dev` is experimental integration. Feature work uses short-lived branches that are merged then deleted, or archived as `archive/<name>` tags.
 
 ## Current Status
 
@@ -96,7 +96,7 @@ The AI bridge and current live-session pack work are being developed and verifie
 
 ## Build on Windows
 
-Not yet verified on current `dev`. The existing CI recipe is Visual Studio 2022 / MSBuild on `src/engine.sln`, but the checked-in `.vcxproj` files do not list this fork's CMake-only sources (agent bridge, xrSim, frame-time telemetry), and Windows CMake CI is disabled. See [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) for the current state, platform gaps, and first checks.
+Not yet verified on current `dev`. See [docs/windows-dev-setup.md](docs/windows-dev-setup.md) for the required toolchain, the recommended CMake + Ninja route (the checked-in `.vcxproj` files do not list this fork's agent bridge, xrSim or frame-time sources), game-data staging, and the Windows bridge gap. Transfer context: [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md).
 
 ## Build on macOS
 
@@ -373,7 +373,8 @@ docs/
 
 - [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md) - current inventory, shipped refs, and open acceptance.
 - [docs/HANDOVER.md](docs/HANDOVER.md) - current project handover and resume guide.
-- [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) - Windows transfer, build reality, and next steps.
+- [docs/windows-dev-setup.md](docs/windows-dev-setup.md) - Windows toolchain, build route, assets, and bridge gaps.
+- [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) - Windows transfer context and next steps.
 - [docs/macos-dev-setup.md](docs/macos-dev-setup.md) - macOS build/run/bridge setup.
 - [docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md](docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md) - renderer and engine roadmap.
 - [docs/superpowers/specs/2026-07-05-agentic-zone-design.md](docs/superpowers/specs/2026-07-05-agentic-zone-design.md) - agentic Zone architecture.

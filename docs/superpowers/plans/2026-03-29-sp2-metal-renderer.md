@@ -1,6 +1,6 @@
 # SP2: Metal Renderer Implementation Plan
 
-> **PARKED (2026-11-07).** M-R0/menu shipped; M-R1 is unmerged at `caa2e4953`. AI on GL is current, so Tasks 22–24 are not the active next milestone. Historical instructions below remain for renderer recovery; see [PLAN_STATUS](../../PLAN_STATUS.md) and the [Metal resume guide](../../HANDOVER.md).
+> **PARKED (2026-11-07).** M-R0/menu shipped; M-R1 is unmerged at `caa2e4953` (tag `archive/feat/metal-mr1-ingame`). AI on GL is current, so Tasks 22–24 are not the active next milestone. Historical instructions below remain for renderer recovery; see [PLAN_STATUS](../../PLAN_STATUS.md) and the [Metal resume guide](../../HANDOVER.md).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
