@@ -15,6 +15,7 @@ class CppExportRoundTripTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix="xray-frame-roundtrip-")
         cls.addClassCleanup(cls.temp.cleanup)
         cls.fixture = Path(cls.temp.name) / "capture.csv"
+        cls.classifications = Path(cls.temp.name) / "classifications.csv"
         binary = Path(cls.temp.name) / "session-tests"
         subprocess.run([
             "c++", "-std=c++20", "-fno-exceptions", "-pthread", "-I" + str(ROOT / "src"),
@@ -22,7 +23,7 @@ class CppExportRoundTripTests(unittest.TestCase):
             str(ROOT / "src/xrEngine/FrameTimeSession.cpp"),
             str(ROOT / "src/xrEngine/tests/FrameTimeSessionTests.cpp"), "-o", str(binary),
         ], check=True, capture_output=True, text=True)
-        cls.cpp_run = subprocess.run([str(binary), str(cls.fixture)], check=True,
+        cls.cpp_run = subprocess.run([str(binary), str(cls.fixture), str(cls.classifications)], check=True,
                                  capture_output=True, text=True)
 
     def test_production_control_export_lifecycle(self):
@@ -52,3 +53,21 @@ class CppExportRoundTripTests(unittest.TestCase):
                                  str(unknown), "--acceptance"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("unprovenanced", result.stdout)
+
+    def test_literal_classifications_before_early_returns(self):
+        capture = report.parse_capture(self.classifications.read_text())
+        self.assertEqual([0, 0, 33, 32, 65, 64, 1], [row["flags"] for row in capture.rows])
+        self.assertEqual([0, 1, 0, 1, 0, 1, 0], [row["not_ready_sleep_calls"] for row in capture.rows])
+        self.assertTrue(all(row["device_sleep_calls"] == 0 for row in capture.rows))
+        for scene, expected, first, last in (
+            ("all", 7, 0, 6), ("steady", 1, 0, 0), ("not_ready", 3, 1, 5),
+            ("device_unavailable", 2, 2, 3), ("window_visibility_unknown", 2, 4, 5),
+            ("loading", 3, 2, 6),
+        ):
+            with self.subTest(scene=scene):
+                selected = report.build_report(capture, scene=scene)
+                self.assertEqual(expected, selected["sample_count"])
+                self.assertEqual((first, last), (selected["first_loop_seq"], selected["last_loop_seq"]))
+                result = subprocess.run(["python3", str(ROOT / "tools/frame_time_report.py"),
+                    str(self.classifications), "--scene", scene, "--acceptance"], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)

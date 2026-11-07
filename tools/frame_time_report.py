@@ -80,9 +80,10 @@ FLAG_PAUSED = 1 << 2
 FLAG_PRECACHE = 1 << 3
 FLAG_INACTIVE = 1 << 4
 FLAG_DEVICE_UNAVAILABLE = 1 << 5
+FLAG_WINDOW_VISIBILITY_UNKNOWN = 1 << 6
 KNOWN_FLAGS = (
     FLAG_LOADING | FLAG_MENU | FLAG_PAUSED | FLAG_PRECACHE |
-    FLAG_INACTIVE | FLAG_DEVICE_UNAVAILABLE
+    FLAG_INACTIVE | FLAG_DEVICE_UNAVAILABLE | FLAG_WINDOW_VISIBILITY_UNKNOWN
 )
 NONSTEADY_FLAGS = KNOWN_FLAGS
 SCENE_FLAGS = {
@@ -92,7 +93,11 @@ SCENE_FLAGS = {
     "precache": FLAG_PRECACHE,
     "inactive": FLAG_INACTIVE,
     "device_unavailable": FLAG_DEVICE_UNAVAILABLE,
+    "window_visibility_unknown": FLAG_WINDOW_VISIBILITY_UNKNOWN,
 }
+
+# Not-ready is an executed phase, not evidence that the render device was lost.
+SCENE_PHASES = {"not_ready": "not_ready_sleep"}
 
 
 class CaptureError(ValueError):
@@ -328,7 +333,10 @@ def _selected_rows(capture: Capture, scene: str) -> list[dict[str, str | int]]:
     if scene == "all":
         return list(capture.rows)
     if scene == "steady":
-        return [row for row in capture.rows if int(row["flags"]) & NONSTEADY_FLAGS == 0]
+        return [row for row in capture.rows
+                if int(row["flags"]) & NONSTEADY_FLAGS == 0 and int(row["not_ready_sleep_calls"]) == 0]
+    if scene in SCENE_PHASES:
+        return [row for row in capture.rows if int(row[f"{SCENE_PHASES[scene]}_calls"]) > 0]
     required = SCENE_FLAGS[scene]
     return [row for row in capture.rows if int(row["flags"]) & required]
 
@@ -377,7 +385,7 @@ def _population_report(rows: list[dict[str, str | int]]) -> dict:
 
 
 def build_report(capture: Capture, scene: str = "all") -> dict:
-    if scene != "all" and scene != "steady" and scene not in SCENE_FLAGS:
+    if scene != "all" and scene != "steady" and scene not in SCENE_FLAGS and scene not in SCENE_PHASES:
         raise ValueError(f"unknown scene filter {scene!r}")
     populations = {
         name: _population_report(_selected_rows(capture, name))
@@ -432,7 +440,7 @@ def build_report(capture: Capture, scene: str = "all") -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capture", type=Path)
-    parser.add_argument("--scene", choices=("all", "steady", *SCENE_FLAGS), default="all")
+    parser.add_argument("--scene", choices=("all", "steady", *SCENE_FLAGS, *SCENE_PHASES), default="all")
     parser.add_argument("--acceptance", action="store_true")
     args = parser.parse_args(argv)
     try:

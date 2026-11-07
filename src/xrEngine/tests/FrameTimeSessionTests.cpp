@@ -1,4 +1,5 @@
 #include "xrEngine/FrameTimeSession.h"
+#include "xrEngine/FrameTimeClassification.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -163,6 +164,56 @@ int main(int argc, char** argv)
     session.EndLoop(42);ticks=2100;session.BeginLoop(42);
     CHECK(session.Control("perf.stop","").ok);ticks=2200;session.BeginLoop(43);
     if(argc>1) { FILE* f=std::fopen(argv[1],"w");CHECK(f); if(f){CHECK(WriteFrameTimeCapture(f,session.Collector(),meta));CHECK(std::fclose(f)==0);} }
+    // One observation before the early-return branch: no render/device-loss call
+    // is needed to retain visibility on loading or not-ready loops.
+    CHECK(session.Control("perf.reset", "").ok);
+    unsigned observations = 0;
+    auto unknownWindow = [&] { ++observations; return FrameTimeWindowVisibility::Unknown; };
+    const auto disabledReads = reads;
+    const auto disabledAllocs = allocationCount.load();
+    ClassifyFrameTimeWindow(session, unknownWindow);
+    CHECK(observations == 0 && reads == disabledReads);
+    CHECK(allocationCount.load() == disabledAllocs);
+    CHECK(session.Control("perf.start", "16 0", &meta).ok);
+    ticks = 3000; session.BeginLoop(50);
+    const FrameTimeWindowVisibility visibility[] = {
+        FrameTimeWindowVisibility::Visible, FrameTimeWindowVisibility::Visible,
+        FrameTimeWindowVisibility::Unavailable, FrameTimeWindowVisibility::Unavailable,
+        FrameTimeWindowVisibility::Unknown, FrameTimeWindowVisibility::Unknown,
+        FrameTimeWindowVisibility::Visible
+    };
+    const uint32_t expectedFlags[] = {0, 0, 33, 32, 65, 64, 1};
+    for (unsigned i = 0; i < 7; ++i)
+    {
+        ClassifyFrameTimeWindow(session, [&] { ++observations; return visibility[i]; });
+        if (i == 1 || i == 3 || i == 5)
+        { // A zero-duration call still identifies the not-ready branch.
+            FrameTimeScope span(session, FrameTimePhase::NotReadySleep);
+        }
+        if (i == 2 || i == 4 || i == 6)
+        {
+            session.Mark(FrameTimeLoopFlags::Loading);
+            FrameTimeScope span(session, FrameTimePhase::LoadDraw);
+            ticks += 20;
+        }
+        session.EndLoop(50 + i); ticks = 3100 + 100 * i; session.BeginLoop(51 + i);
+    }
+    CHECK(observations == 7);
+    CHECK(session.Control("perf.stop", "").ok); ticks = 3800; session.BeginLoop(58);
+    ClassifyFrameTimeWindow(session, unknownWindow); CHECK(observations == 7);
+    const auto classified = session.Collector().Samples();
+    CHECK(classified.size == 7 && session.Collector().GetStatus().invalid_loops == 0);
+    for (unsigned i = 0; i < classified.size; ++i)
+    {
+        CHECK(classified.data[i].flags == expectedFlags[i]);
+        CHECK(classified.data[i].Phase(FrameTimePhase::DeviceSleep).calls == 0);
+        CHECK(classified.data[i].Phase(FrameTimePhase::NotReadySleep).calls == (i == 1 || i == 3 || i == 5));
+    }
+    if (argc > 2)
+    {
+        FILE* f = std::fopen(argv[2], "w"); CHECK(f);
+        if (f) { CHECK(WriteFrameTimeCapture(f, session.Collector(), meta)); CHECK(std::fclose(f) == 0); }
+    }
     std::printf("%s: session control, generations, threads, export retention and literal writer\n",failures?"FAIL":"PASS");
     return failures?1:0;
 }

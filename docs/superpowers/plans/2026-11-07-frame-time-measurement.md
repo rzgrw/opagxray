@@ -1,7 +1,7 @@
 # Frame-time measurement implementation plan
 
 **Date:** 2026-11-07
-**Status:** Tasks 2–3 implemented with isolated GL build and bounded private-runtime functional evidence; independent review, provenance acceptance, and overhead gates remain open
+**Status:** Tasks 2–3 independently approved and checkpointed at `a389540d8`; classification independently approved with bounded native hide/load/ready verification; forced fault paths remain open; provenance acceptance and overhead gates remain open
 **Design:** [Frame-time measurement design](../specs/2026-11-07-frame-time-measurement-design.md)
 
 ## Goal
@@ -377,4 +377,63 @@ A collector, runtime loop/GL instrumentation, safe stopped-only bridge export, a
 
 Two independent Grok reviews approved the exact Tasks 2–3 source snapshot: bridge/session/export review `ctx_4f71f11ccd75` and loop/phase review `ctx_eb6a7ef8a6ad`. Coordinator verification matched all 17 source hashes and all five runtime binary hashes in `artifacts/frame-time/task-2287db229386/report.json`, ran the three built CMake executables successfully, and reran all 64 Python tests successfully. This closes independent integration review, not performance acceptance.
 
-Nonblocking classification limitations remain: not-ready loops also set device-unavailable, and Cocoa occlusion is observed through RenderBegin rather than on loading/not-ready early-return paths. These require explicit classification handling before filtered benchmark acceptance. The earlier injected-clock high-water limitation remains diagnostic-only and rejected by strict parsing. The 55-row runtime export is functional evidence and correctly remains unprovenanced; verified asset/overlay provenance, fault branches, overhead reference, repeated performance measurements and donor equivalence remain open. Binary hashes were checked at their actual isolated artifact bin paths, not in the staged content runtime.
+At the integration checkpoint, two nonblocking classification limitations remained: not-ready loops also set device-unavailable, and Cocoa occlusion was observed through RenderBegin rather than on loading/not-ready early-return paths. The narrow classification follow-up below addresses these before filtered benchmark acceptance. The earlier injected-clock high-water limitation remains diagnostic-only and rejected by strict parsing. The 55-row runtime export is functional evidence and correctly remains unprovenanced; verified asset/overlay provenance, fault branches, overhead reference, repeated performance measurements and donor equivalence remain open. Binary hashes were checked at their actual isolated artifact bin paths, not in the staged content runtime.
+
+### Classification follow-up (2026-11-07, task_e6f0684be4f3)
+
+Based on independently approved checkpoint `a389540d8`, this narrow follow-up addresses both P3 findings from `artifacts/frame-time/task-5acc26a5a199/integration-review.md`. Not-ready `Sleep(100)` retains its exact scope and scheduling but no longer asserts device loss. The reporter's steady predicate now requires zero `not_ready_sleep_calls`, including measured zero-duration calls; `--scene not_ready` selects those executed phases without adding a not-ready flag or dropping raw rows.
+
+SDL2's cached window flags and events do not expose Cocoa occlusion (the installed SDL3 API does, but the engine uses SDL2). There was no existing native-occlusion cache in the engine. The SDK 15.4 `NSWindow.h` defines visible as bit 1 and exposes the readonly `occlusionState` property; `CHW::GetDeviceState` already uses it. A telemetry-gated window observer now reads that same property once at `ProcessFrame` entry, before loading/not-ready returns, without invoking renderer state or any GL API. Hidden/minimized flags directly identify unavailable. Failed native lookup, wrong Apple backend, or missing native window instead sets new bit 6, `window_visibility_unknown`, excluded from steady and separately selectable. Other platforms retain SDL hidden/minimized coverage, without a native occlusion claim. Game-state classification still runs before and after existing callbacks; native observation is not repeated after callbacks. The disabled callback is never invoked. Renderer safety checks, bridge/control/export, collector algorithm, input and all waits remain unchanged.
+
+The first parser regression run failed as intended: two unflagged not-ready records incorrectly entered steady; bit 6 was undeclared. Final verification passed:
+
+- All three real CMake binaries (collector, boundary, session), each built with `-fno-exceptions`; engine compilation retains Darwin `XRAY_EXCEPTIONS=0`.
+- **67 Python tests**, including literal production C++ writer → strict parser/CLI classification checks. The seven-row fixture has flags `[0,0,33,32,65,64,1]`; populations are all=7, steady=1, not-ready=3, device-unavailable=2, unknown-visibility=2, loading=3. A sole zero-duration not-ready record fails steady acceptance. Fixture metadata is explicitly test data, not runtime provenance.
+- Session/classification tests under ASan/UBSan, including no observer/clock/allocation on the disabled path and no observer after stop. The CMake and sanitized writers emit byte-identical classification CSV.
+- Full incremental GL build with the existing isolated arm64 Release/SDK15.4/deployment15.0/unity-ON configuration, parked renderers OFF and `-j10`. The first link failed on `objc_msgSend`/`sel_registerName`: xrEngine now needs the same Apple-only `objc` linkage already used by xrRender_GL. Adding that precise link dependency resolved it; no dependency revision or unrelated source repair was made. Existing warnings remain in the logs.
+
+```bash
+cmake --build artifacts/frame-time/task-2287db229386/build -j10
+cmake --build artifacts/frame-time/task-2287db229386/build \
+  --target xrFrameTimeCollectorTests xrFrameTimeCollectorBoundaryTests xrFrameTimeSessionTests -j10 --verbose
+artifacts/frame-time/task-2287db229386/bin/xrFrameTimeCollectorTests
+artifacts/frame-time/task-2287db229386/bin/xrFrameTimeCollectorBoundaryTests
+artifacts/frame-time/task-2287db229386/bin/xrFrameTimeSessionTests \
+  artifacts/frame-time/task-e6f0684be4f3/cmake-literal.csv \
+  artifacts/frame-time/task-e6f0684be4f3/cmake-classifications.csv
+python3 -m unittest discover -s tools/tests -v
+c++ -std=c++20 -fno-exceptions -pthread -fsanitize=address,undefined -fno-omit-frame-pointer -Isrc \
+  src/xrEngine/FrameTimeCollector.cpp src/xrEngine/FrameTimeSession.cpp \
+  src/xrEngine/tests/FrameTimeSessionTests.cpp -o artifacts/frame-time/task-e6f0684be4f3/session-sanitized
+artifacts/frame-time/task-e6f0684be4f3/session-sanitized \
+  artifacts/frame-time/task-e6f0684be4f3/literal.csv artifacts/frame-time/task-e6f0684be4f3/classifications.csv
+```
+
+Outputs remain under `artifacts/frame-time/task-2287db229386/bin`, with new evidence under `artifacts/frame-time/task-e6f0684be4f3`. The automatic CMake regeneration and exact cache/compile/link flags are retained there. Source identity includes the new classification helper and was independently recomputed as `701eeb643fadf320d13f611122c3820a712c990401ac290009640d6c1fda0439`. `report.json` contains exact source/binary hashes, commands, full review diff/hash and test results; pinned submodules remain clean and unchanged.
+
+**Verification boundary:** classification helper/phase/parser behavior was executed with deterministic observations; actual Cocoa lookup failures, physical occlusion/minimize/hide while loading/not-ready, and native window-state transitions are source-reviewed and compiled only. No runtime was launched, no private runtime was changed, and this follow-up claims no live classification, performance, provenance or overhead acceptance. Independent review of this delta is next, followed by a coordinator-assigned exclusive runtime slot for the native classification cases; the separate provenance/overhead designs and remaining performance gates are untouched.
+
+### Bounded classification runtime verification (2026-11-07, task_b0c500502419)
+
+Grok approved the exact classification snapshot in `artifacts/frame-time/task-b91a2eb139b6/classification-review.md`. Before launch and again after exit, all 10 changed-source hashes, 12 unchanged-source hashes, and eight binary hashes matched `task-e6f0684be4f3/report.json`. No implementation source or binary was changed in this runtime slice; this plan is the only product-file edit.
+
+A fresh sibling runtime, `build/runtime/frame-time-b0c5`, was staged from the exact documented CoC base/patch and target GL overlay (495 managed files). No settings, saves, or writable overlays were reused from the earlier task runtime or user playtest. The generated config remained 1280×720/windowed, `rs_v_sync on`, sound initialized with muted volumes; the actual exported SDL swap interval is **adaptive**, not inferred from the config label. The binary was the approved `artifacts/frame-time/task-2287db229386/bin/xr_3da`, launched from the sibling runtime with `-agent_bridge appdata/b.sock`. Owned PID **48003**, launcher PID **47998**, ran for about **328 seconds**, then accepted ordinary bridge `cmd quit` and exited **0**; a PID-specific `ps` check confirms it is gone. The runtime slot is released, with files retained.
+
+Fresh-game menu selection was Rookie / Loner / Rookie Village (Cordon), using only the game bridge. Ready state confirmed `level=l01_escape`, `loadscr=0`, `precache=0`, `paused=0`. Bounded movement changed the position from approximately `(-207.9,-22.5,-128.5)` to `(-207.7,-22.1,-127.3)`; a unique private `ft_b0c5_verified` save reloaded at the latter position. Inventory and final menu screenshots were visually inspected. Early world images looked toward nearby bunker geometry; targeted bridge camera movement then provided an inspectable interior view. Those images are functional UI/render evidence, not the fixed-camera performance scenario. All screenshots were taken outside active captures. Both retained logs have zero matches for the existing fatal/GL/lua-runtime-error scan; ordinary nonfatal CoC content warnings remain in the full logs.
+
+Native control was confined to the spawned PID and game window **39551**. A small external AppKit helper checked the process executable path before calling `NSRunningApplication.hide/unhide/activate`; readback used `isHidden` and that PID's CGWindow on-screen state. No other app/window was altered or closed, and no global keys were injected. The hide API sometimes returned false before or despite a real hidden transition: the first harness assertion stopped that attempt early, but its `finally` restored the process and its capture was exported. Its historically named `native-hide-rejected.csv` is valid diagnostic evidence, not a parser rejection. The subsequent loading and ready checks verified hidden=true and the owned window absent from on-screen state, then verified hidden=false after restoration. Raw native return values and delayed readbacks are preserved rather than conflated.
+
+| Functional capture | Rows | Observed classification |
+|---|---:|---|
+| `initial-menu.csv` | 30 | All menu, unavailable=0, unknown=0 |
+| `native-hide-rejected.csv` | 604 | All menu; 12 unavailable loops with device sleep during the actual brief hide |
+| `newgame-loading-hide.csv` | 33 | 26 loading/load-draw loops; 6 also unavailable; 18 precache loops |
+| `ready-game.csv` | 52 | All flags zero; all 52 selected as steady |
+| `ready-hide-restore.csv` | 118 | 38 unavailable loops; visible intervals return to flags zero |
+| `loaded-menu.csv` | 17 | All menu and paused |
+
+All six captures have zero invalid/dropped loops and no truncation. Every export matches source fingerprint `701eeb643fadf320d13f611122c3820a712c990401ac290009640d6c1fda0439` and parses under the strict reporter. `--acceptance` exits **1** as required for unknown content/overlay provenance; the menu-to-game load capture also truthfully loses fixed frame-limit provenance during the transition. No acceptance or timing-performance claim follows. Stop requested during new-game loading waited about **2.79 seconds** for existing bridge responsiveness, without changing `OnFrame` scheduling.
+
+**Limits:** this is real native hide/restore, not injected telemetry flags, and it exercises unavailable labeling while loading and in a ready game. It does not isolate Cocoa-only occlusion from SDL hidden state. The six unavailable loading rows also contain device-sleep calls from existing LoadDraw/render handling, so the raw records alone do not prove which mark site first set bit 5. No forced not-ready, indefinite-load timeout, native WM lookup failure/bit 6, minimized window, independent hardware device-loss/reset, or separate occluding-window test was performed: there was no safe production fault path for the first three, and these were not fabricated with test observers or a new production API. Their acceptance remains open. No provenance or overhead implementation, implementation source change, engine build, dependency change, provider call, commit, or GitHub action occurred during this slice.
+
+Exact launch/staging/native-control commands, all bridge requests and replies, source/binary and capture hashes, native state readbacks, parser outputs, process lifecycle, screenshots, full logs and `report.json` are under `artifacts/frame-time/task-b0c500502419/`. The earlier private runtime and earlier evidence were left intact. Next steps remain separate provenance/overhead work and any explicitly authorized fault-path verification; this bounded functional slot is complete and released.

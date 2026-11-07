@@ -49,6 +49,7 @@ enum class FrameTimeLoopFlags : uint32_t
     Precache = 1u << 3,
     Inactive = 1u << 4,
     DeviceUnavailable = 1u << 5,
+    WindowVisibilityUnknown = 1u << 6,
 };
 
 enum class FrameTimeResult : uint8_t

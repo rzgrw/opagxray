@@ -76,7 +76,7 @@ target_link_libraries(xrSimAuthoritySpineTests PRIVATE xrSimCore)
 # Configure-time source identity includes the telemetry implementation bytes and
 # honestly labels the worktree; it does not claim authenticated runtime assets.
 set(frame_time_identity "${XRAY_GIT_SHA}")
-foreach(source FrameTimeCollector.h FrameTimeCollector.cpp FrameTimeSession.h FrameTimeSession.cpp
+foreach(source FrameTimeCollector.h FrameTimeCollector.cpp FrameTimeSession.h FrameTimeSession.cpp FrameTimeClassification.h
     device.h device.cpp x_ray.cpp AgentBridge.cpp CMakeLists.txt)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${source}" source_hash)
@@ -563,6 +563,11 @@ target_link_libraries(xrEngine
     Theora::Theora
     SDL2::SDL2
 )
+
+if (APPLE)
+    # Native window occlusion classification before loading/not-ready returns.
+    target_link_libraries(xrEngine PRIVATE objc)
+endif()
 
 target_compile_definitions(xrEngine
     PRIVATE

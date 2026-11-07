@@ -63,6 +63,7 @@ FLAG_NAMES = {
     "precache": 8,
     "inactive": 16,
     "device_unavailable": 32,
+    "window_visibility_unknown": 64,
 }
 NONSTEADY_FLAGS = sum(FLAG_NAMES.values())
 
@@ -215,10 +216,49 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(CaptureError):
             parse_capture(capture_text([record(0, 100, 100), record(1, 250, 100)], {"invalid_loops": "1"}))
 
+    def test_not_ready_is_separate_from_device_loss_and_never_steady(self):
+        capture = parse_capture(capture_text([
+            record(0, 0, 100),
+            record(1, 100, 100, not_ready_sleep_calls=1, not_ready_sleep_ns=0),
+            record(2, 200, 100, not_ready_sleep_calls=1, not_ready_sleep_ns=100),
+            record(3, 300, 100, flags=32, device_sleep_calls=1, device_sleep_ns=50),
+        ]))
+        steady = build_report(capture, scene="steady")
+        self.assertEqual(1, steady["sample_count"])
+        self.assertEqual(0, steady["last_loop_seq"])
+        not_ready = build_report(capture, scene="not_ready")
+        self.assertEqual(2, not_ready["sample_count"])
+        self.assertEqual(0, not_ready["flags"]["device_unavailable"])
+        lost = build_report(capture, scene="device_unavailable")
+        self.assertEqual(1, lost["sample_count"])
+        self.assertEqual(3, lost["first_loop_seq"])
+        self.assertEqual(4, steady["populations"]["all"]["sample_count"])
+        only_not_ready = capture_text([
+            record(0, 0, 100, not_ready_sleep_calls=1, not_ready_sleep_ns=0)
+        ])
+        self.assertEqual("empty_selection", build_report(parse_capture(only_not_ready), scene="steady")["status"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "not-ready.csv"
+            path.write_text(only_not_ready)
+            with mock.patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(1, main([str(path), "--scene", "steady", "--acceptance"]))
+                self.assertEqual(0, main([str(path), "--scene", "not_ready", "--acceptance"]))
+
+    def test_unknown_window_visibility_is_not_occlusion_or_steady(self):
+        capture = parse_capture(capture_text([
+            record(0, 0, 100), record(1, 100, 100, flags=64),
+            record(2, 200, 100, flags=65, load_draw_calls=1, load_draw_ns=20),
+        ]))
+        unknown = build_report(capture, scene="window_visibility_unknown")
+        self.assertEqual(2, unknown["sample_count"])
+        self.assertEqual(0, unknown["flags"]["device_unavailable"])
+        self.assertEqual(1, build_report(capture, scene="steady")["sample_count"])
+        self.assertEqual(3, build_report(capture)["sample_count"])
+
     def test_integer_bounds_and_unknown_flags(self):
         for changes in (
             {"engine_frame_begin": 2**32}, {"engine_frame_end": 2**32},
-            {"flags": 64}, {"wall_ns": " 100"}, {"wall_ns": "+100"},
+            {"flags": 128}, {"wall_ns": " 100"}, {"wall_ns": "+100"},
             {"wall_ns": "١٠٠"}, {"wall_ns": "9" * 5000},
             {"main_calls": 1, "main_ns": 2**64},
         ):

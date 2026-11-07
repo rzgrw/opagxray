@@ -8,6 +8,7 @@
 #include "XR_IOConsole.h"
 #include "xr_input.h"
 #include "AgentBridge.h"
+#include "FrameTimeClassification.h"
 
 #include "IGame_Level.h"
 #include "IGame_Persistent.h"
@@ -15,6 +16,13 @@
 #include "xrScriptEngine/script_space.hpp"
 
 #include <SDL.h>
+
+#ifdef XR_PLATFORM_APPLE
+#include <SDL_syswm.h>
+// As in glHW.cpp: objc headers conflict with the engine-wide BOOL typedef.
+extern "C" void* objc_msgSend(void);
+extern "C" void* sel_registerName(const char*);
+#endif
 
 ENGINE_API CRenderDevice Device;
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
@@ -170,7 +178,6 @@ bool CRenderDevice::BeforeFrame()
 
     if (!b_is_Ready)
     {
-        FrameTime.Mark(FrameTimeLoopFlags::DeviceUnavailable);
         FrameTimeScope span(FrameTime, FrameTimePhase::NotReadySleep);
         Sleep(100);
         return false;
@@ -269,10 +276,41 @@ void CRenderDevice::DoRender()
     stats.RenderTotal.accum = renderTotalReal.accum;
 }
 
+namespace
+{
+xray::frametime::FrameTimeWindowVisibility ObserveFrameTimeWindow(SDL_Window* window)
+{
+    using xray::frametime::FrameTimeWindowVisibility;
+    if (!window)
+        return FrameTimeWindowVisibility::Unknown;
+    const auto flags = SDL_GetWindowFlags(window);
+    if (flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED))
+        return FrameTimeWindowVisibility::Unavailable;
+#ifdef XR_PLATFORM_APPLE
+    // SDL2 exposes no cached Cocoa occlusion flag/event. Read the native property
+    // used by CHW::GetDeviceState, without invoking the renderer or any GL API.
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info) || info.subsystem != SDL_SYSWM_COCOA || !info.info.cocoa.window)
+        return FrameTimeWindowVisibility::Unknown;
+    constexpr unsigned long NSWindowOcclusionStateVisible = 1ul << 1;
+    const auto occlusion = reinterpret_cast<unsigned long (*)(void*, void*)>(&objc_msgSend)(
+        info.info.cocoa.window, sel_registerName("occlusionState"));
+    return (occlusion & NSWindowOcclusionStateVisible) ? FrameTimeWindowVisibility::Visible :
+        FrameTimeWindowVisibility::Unavailable;
+#else
+    // Other backends retain SDL hidden/minimized classification; no claim of a
+    // native occlusion observation is made on those platforms.
+    return FrameTimeWindowVisibility::Visible;
+#endif
+}
+}
+
 void CRenderDevice::ProcessFrame()
 {
     ZoneScoped;
 
+    ClassifyFrameTimeWindow(FrameTime, [this] { return ObserveFrameTimeWindow(m_sdlWnd); });
     const auto classify = [this]
     {
         if (!FrameTime.Running()) return;
@@ -281,9 +319,6 @@ void CRenderDevice::ProcessFrame()
         if (Paused()) FrameTime.Mark(FrameTimeLoopFlags::Paused);
         if (dwPrecacheFrame) FrameTime.Mark(FrameTimeLoopFlags::Precache);
         if (!b_is_Active) FrameTime.Mark(FrameTimeLoopFlags::Inactive);
-        const auto flags = SDL_GetWindowFlags(m_sdlWnd);
-        if (flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED))
-            FrameTime.Mark(FrameTimeLoopFlags::DeviceUnavailable);
         FrameTime.ObserveDimensions(dwWidth, dwHeight, false);
     };
     classify();
