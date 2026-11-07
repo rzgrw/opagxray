@@ -76,11 +76,22 @@
 - Create: `src/xrEngine/xrSim/tests/xrSimAuthoritySpineTests.cpp`
 - Modify: `src/xrEngine/CMakeLists.txt`
 
+**Task 1 recovery notes (2026-11-07, base `8984220b6`; uncommitted for review):**
+
+- Recovered only the four manifest/state files from `origin/codex/ai-authority-spine-gate1` at `1d951aa07` (original implementation `facec9eb9`), then repaired them against behavioral tests. They were absent from `dev`, not from repository history. No downstream authority/provider/runtime code was imported; Step 5 is intentionally deferred to the coordinator.
+- Identity ruling: generation-1 handles use one monotonic index across factions → anchors → routes → resources → groups, preserving manifest order within each table; appended groups/actors use the same counter. `ResolveScopeSubject(kind, id)` maps one-based faction/all-group ordinals independently of packed handles; singleton zone/ecology/economy/region IDs are `1`. Wrong-kind and invalid-generation lookups fail. Names are unique within each record table; group and agent names may intentionally coincide.
+- Coordinator B4/B5 ruling: successful bootstrap increments `Epoch()` and resets revision to `1`; failure preserves the complete old world. Replacement begins a new handle lifetime. Named mutations advance revision on changes, not failures/noops; `AppendEvent` now returns `ZoneResult`. Mutable getters/objectives and `SetRevision` are staging-only. Task 3 must check the base epoch, revision **and full snapshot** before synchronous atomic replacement; runtime must cancel old work/rebuild authority on replacement. These downstream requirements are not implemented by Task 1.
+- Parser decisions: decimal integers without whitespace/plus, CRLF/LF and optional final newline, nonempty UTF-8 fields, no control characters or CSV escaping, blank lines accepted, unknown/comment records rejected. Input is bounded at 256 KiB; existing name/count caps apply, `origin=player`, `0 <= minimum <= quantity <= 1000`, owner references and scope-compatible whitelisted charters are validated again for direct bootstrap. Exactly one Zone Director and an Ecology owner for packs are required; the exact nine-agent file fixture remains Task 10.
+- Snapshot includes all canonical/provenance fields, handles, epoch, revision and allocation/event counters, using length-prefixed strings and classic-locale integers. Digest is lowercase FNV-1a-64 of that snapshot for diagnostics, not collision-safe commit authorization or a save-game format.
+- Review follow-up (M1/M2/L3/L5): dynamic group agent IDs cannot reuse any manifest agent or existing group owner; shared UTF-8/control/length validation covers names, incident kinds and event text. Event participants must be absent or resolve canonical generation-1 handles. Dissolution rejects live salient children and active NamedActor objectives on children. Rejections preserve the complete snapshot; test setup mutations are asserted.
+- Dynamic-group ruling L4: at most **32 active groups**, distinct from the parser's 32 total manifest-group records. All groups are append-only (manifest first, then dynamic); inactive tombstones retain ordinal/name/agent identity and release active capacity. There is no scenario-level total lifetime record cap (finite handle index exhaustion still fails safely). Lookup existence grants no authority.
+- Evidence: recovered baseline produced 98 failing assertions; mutation/lifetime/const-lookup regressions also ran red before fixes. Final verification: integrated `xrSimCore`, `xrSimAuthoritySpineTests` (14 test groups), unchanged `xrSimWorldStateTests` (76 cases), C++17 `-fno-exceptions` with ASan/UBSan, and all 41 tools tests pass. This is Task 1 only, not Gate 1 completion; no live game/provider requests were made.
+
 **Interfaces:**
 - Consumes: `xrSim::Handle` from `xrSimWorldState.h`; no runtime or provider dependency.
 - Produces: `ParseZoneManifest(const std::string&) -> ZoneManifestParseResult`, `ZoneState::Bootstrap(const ZoneManifest&) -> ZoneResult`, stable lookup methods, `ZoneState::Revision()`, `ZoneState::Digest()`, and `ZoneState::SaveSnapshot()`.
 
-- [ ] **Step 1: Add the focused test target and failing manifest/state tests**
+- [x] **Step 1: Add the focused test target and failing manifest/state tests**
 
 Add the new source target beside `xrSimWorldStateTests`:
 
@@ -174,7 +185,7 @@ int main()
 }
 ```
 
-- [ ] **Step 2: Build to verify the new tests fail**
+- [x] **Step 2: Build to verify the new tests fail**
 
 Run:
 
@@ -184,7 +195,7 @@ cmake --build build -j10 --target xrSimAuthoritySpineTests
 
 Expected: compilation fails because `xrSimZoneManifest.h` and `xrSimZoneState.h` do not exist.
 
-- [ ] **Step 3: Define the manifest and canonical-state value types**
+- [x] **Step 3: Define the manifest and canonical-state value types**
 
 Use these public contracts:
 
@@ -383,7 +394,7 @@ private:
 
 The parser must normalize CRLF, reject invalid UTF-8/control bytes, reject unknown keys, require exactly one header/scenario/save/level/seed/origin, cap every name/section at 96 bytes, cap groups and agents at 32, group size at 8, anchors/routes/resources at 64, reject duplicate names/agent IDs/scopes, and verify every group/resource/route reference before returning `ok=true`. Parse groups with `group=name,kind,owner_domain,section,count,anchor,agent_id`: a Squad owner domain must name a declared faction, while a MutantPack owner domain must be the literal `ecology` and stores an invalid faction handle. Parse agents with the exact `agent=id,scope_kind,scope_id,name,charter_key` grammar; reject zero IDs, unknown scope kinds, and charter keys outside `zone_director_v1|stalker_faction_v1|bandit_faction_v1|ecology_v1|economy_v1|region_v1|squad_v1|pack_v1`. `Bootstrap` must build records in manifest order, assign 24-bit-index/8-bit-generation handles with generation `1`, set revision to `1`, and leave no partial state on failure by constructing a local `ZoneState staged` and moving it into `*this` only after validation.
 
-- [ ] **Step 4: Register sources and run the focused tests**
+- [x] **Step 4: Register sources and run the focused tests**
 
 Add the four new production files to `xrSimCore`, then run:
 
@@ -394,7 +405,7 @@ cmake --build build -j10 --target xrSimAuthoritySpineTests
 
 Expected: build succeeds and exits `0` with no `FAIL:` lines.
 
-- [ ] **Step 5: Commit the deterministic canonical-state foundation**
+- [x] **Step 5: Commit the deterministic canonical-state foundation**
 
 ```bash
 git add src/xrEngine/CMakeLists.txt src/xrEngine/xrSim/xrSimZoneManifest.h src/xrEngine/xrSim/xrSimZoneManifest.cpp src/xrEngine/xrSim/xrSimZoneState.h src/xrEngine/xrSim/xrSimZoneState.cpp src/xrEngine/xrSim/tests/xrSimAuthoritySpineTests.cpp

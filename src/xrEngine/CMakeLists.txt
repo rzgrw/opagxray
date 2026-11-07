@@ -6,6 +6,10 @@ if(XRAY_AGENT_HTTP)
 endif()
 
 add_library(xrSimCore STATIC
+    xrSim/xrSimZoneManifest.h
+    xrSim/xrSimZoneManifest.cpp
+    xrSim/xrSimZoneState.h
+    xrSim/xrSimZoneState.cpp
     xrSim/xrSimActuator.cpp
     xrSim/xrSimActuator.h
     xrSim/xrSimActorIntent.cpp
@@ -59,6 +63,15 @@ target_link_libraries(xrSimWorldStateTests
     PRIVATE
     xrSimCore
 )
+
+add_executable(xrSimAuthoritySpineTests EXCLUDE_FROM_ALL
+    xrSim/tests/xrSimAuthoritySpineTests.cpp
+)
+target_include_directories(xrSimAuthoritySpineTests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/src"
+)
+target_link_libraries(xrSimAuthoritySpineTests PRIVATE xrSimCore)
 
 target_sources_grouped(
     TARGET xrEngine
