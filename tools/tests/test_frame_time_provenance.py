@@ -1,21 +1,25 @@
 """Fixture-only seal and attest tests. No game launch and no live attestation."""
 
 import contextlib
+import ctypes
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
 import unittest
 from unittest import mock
 
+from tools import frame_time_provenance as provenance
 from tools.frame_time_provenance import (
-    CHUNK, FRAME_SCHEMA, Deadline, GateError, LiveProcess, _contained, aggregate,
-    evaluate_frame_time_measurement, images_from_vmmap_text, is_os_image,
-    main, parse_macho, source_build,
+    CHUNK, FRAME_SCHEMA, Deadline, GateError, LiveProcess, _agent_bridge_token,
+    _bridge_socket, _contained, _directories_overlap, _ordinary_external_socket, aggregate,
+    evaluate_frame_time_measurement, images_from_vmmap_text, inspect_runtime,
+    is_os_image, main, parse_macho, source_build, _process_owns_bridge_socket,
 )
 from tools.frame_time_provenance import attest, seal
 from tools.stage_coc_runtime import filesystem_text
@@ -66,6 +70,39 @@ def _write(path: Path, data: bytes) -> None:
 
 def _failure(doc: dict) -> str:
     return doc['failures'][0]['code']
+
+
+def _case_alias(path: Path) -> Path | None:
+    """Different spelling of one directory, when this volume folds case.
+
+    None means the swapped spelling is not an existing same-inode directory
+    whose realpath keeps that spelling. Case-sensitive volumes take that path.
+    """
+    real = Path(os.path.realpath(path))
+    alias = real.with_name(real.name.swapcase())
+    if alias.name == real.name or not alias.exists() or not os.path.samefile(real, alias):
+        return None
+    if os.path.realpath(alias) != str(alias):
+        return None
+    return alias
+
+
+def _listen(runtime: Path, rel: str) -> socket.socket:
+    """Bind the engine's relative path from the runtime cwd and keep the fd open."""
+    path = runtime.joinpath(*rel.split('/'))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    previous = os.getcwd()
+    os.chdir(runtime)
+    try:
+        sock.bind(rel)
+        sock.listen(1)
+    except Exception:
+        sock.close()
+        raise
+    finally:
+        os.chdir(previous)
+    return sock
 
 
 class Runtime:
@@ -126,8 +163,10 @@ class Runtime:
         _write(self.runtime / 'stage-manifest.json',
                (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode())
 
-    def _write_launcher(self, pid: int, argv: list[str] | None = None) -> None:
-        exe = os.path.realpath(self.exe)
+    def _write_launcher(self, pid: int, argv: list[str] | None = None,
+                        external_communication_directory: str | None = None,
+                        executable: str | None = None) -> None:
+        exe = os.path.realpath(executable or self.exe)
         images = [exe, os.path.realpath(self.dylib), OS_IMAGE]
         self.process = type(self).process_type(pid, exe, images)
         doc = {
@@ -137,6 +176,8 @@ class Runtime:
             'argv': argv or ['xr_3da'],
             'cwd': os.path.realpath(self.runtime),
         }
+        if external_communication_directory is not None:
+            doc['external_communication_directory'] = external_communication_directory
         _write(self.launcher, (json.dumps(doc, indent=2, sort_keys=True) + '\n').encode())
 
     class process_type:
@@ -213,6 +254,7 @@ class ProvenanceFixtureTests(unittest.TestCase):
         self.assertIsNone(sealed['measurement_accepted'])
         self.assertFalse(sealed['live_runtime_attested'])
         self.assertEqual(sealed['process_observation'], 'fixture')
+        self.assertIsNone(sealed['bridge_socket'])
         self.assertEqual(sealed['settle_seconds'], 1.5)
         self.assertEqual(sealed['source_build'], source_build('Release'))
         self.assertEqual(sealed['configured_loads'], ['libfix.dylib'])
@@ -1081,6 +1123,727 @@ class ProvenanceFixtureTests(unittest.TestCase):
         self.assertEqual(code, 1, doc)
         self.assertEqual(_failure(doc), 'symlink')
 
+    def test_bridge_socket_seals_the_launcher_endpoint(self):
+        rel = 'appdata/prov.sock'
+        sock = _listen(self.world.runtime, rel)
+        try:
+            self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', rel])
+            code, sealed, seal_path = self.world.do_seal()
+            self.assertEqual(code, 0, sealed)
+            info = os.lstat(self.world.runtime.joinpath(*rel.split('/')))
+            self.assertEqual(sealed['bridge_socket'], {
+                'path': rel,
+                'dev': str(info.st_dev),
+                'ino': str(info.st_ino),
+                'association': 'launcher-record',
+            })
+            self.assertFalse(sealed['live_runtime_attested'])
+            self.assertNotIn(rel, [item['path'] for item in sealed['managed_files']])
+            self.assertNotIn(rel, sealed['settings_paths'])
+            text = _csv(sealed['source_build'])
+            status, doc, _capture, _before = self.world.do_attest(
+                seal_path, text, self.world.root / 'bridge-attest.json')
+            self.assertEqual(status, 0, doc)
+            self.assertTrue(doc['asset_verified'])
+            self.assertTrue(doc['measurement_accepted'])
+            self.assertFalse(doc['live_runtime_attested'])
+        finally:
+            sock.close()
+        os.unlink(self.world.runtime.joinpath(*rel.split('/')))
+
+        default = 'appdata/agent_bridge.sock'
+        default_sock = _listen(self.world.runtime, default)
+        try:
+            self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', '-ltx', 'user.ltx'])
+            code, sealed, _out = self.world.do_seal(self.world.root / 'default-bridge.json')
+            self.assertEqual(code, 0, sealed)
+            self.assertEqual(sealed['bridge_socket']['path'], default)
+            self.assertEqual(sealed['bridge_socket']['association'], 'launcher-record')
+            self.assertFalse(sealed['live_runtime_attested'])
+        finally:
+            default_sock.close()
+        os.unlink(self.world.runtime.joinpath(*default.split('/')))
+
+        again = _listen(self.world.runtime, rel)
+        try:
+            lexical = str(os.path.realpath(self.world.runtime.joinpath(*rel.split('/'))))
+            via_var = lexical
+            if lexical.startswith('/private/var/'):
+                via_var = '/var/' + lexical[len('/private/var/'):]
+            self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', via_var])
+            code, sealed, _out = self.world.do_seal(self.world.root / 'absolute-bridge.json')
+            self.assertEqual(code, 0, sealed)
+            self.assertEqual(sealed['bridge_socket']['path'], rel)
+            self.assertEqual(sealed['bridge_socket']['dev'], str(os.lstat(lexical).st_dev))
+            self.assertEqual(sealed['bridge_socket']['ino'], str(os.lstat(lexical).st_ino))
+        finally:
+            again.close()
+
+    def test_bridge_socket_rejects_substitutes(self):
+        rel = 'appdata/prov.sock'
+        runtime = self.world.runtime
+        target = _listen(runtime, 'appdata/real.sock')
+        try:
+            link = runtime / 'appdata/prov.sock'
+            link.symlink_to('real.sock')
+            self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', rel])
+            code, doc, _out = self.world.do_seal(self.world.root / 'sock-link.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'symlink')
+            self.assertEqual(doc['failures'][0]['path'], rel)
+            link.unlink()
+        finally:
+            target.close()
+        os.unlink(runtime / 'appdata/real.sock')
+
+        os.mkfifo(runtime / rel)
+        code, doc, _out = self.world.do_seal(self.world.root / 'sock-fifo.json')
+        self.assertEqual(code, 1, doc)
+        self.assertEqual(_failure(doc), 'nonregular')
+        self.assertIn('not a socket', doc['failures'][0]['detail'])
+        os.remove(runtime / rel)
+
+        _write(runtime / rel, b'regular-bytes')
+        code, doc, _out = self.world.do_seal(self.world.root / 'sock-file.json')
+        self.assertEqual(code, 1, doc)
+        self.assertEqual(_failure(doc), 'nonregular')
+        self.assertEqual(doc['failures'][0]['path'], rel)
+        self.assertIn('not a socket', doc['failures'][0]['detail'])
+        os.remove(runtime / rel)
+
+        endpoint = _listen(runtime, rel)
+        extra = _listen(runtime, 'appdata/extra.sock')
+        try:
+            code, doc, _out = self.world.do_seal(self.world.root / 'sock-extra.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'nonregular')
+            self.assertEqual(doc['failures'][0]['path'], 'appdata/extra.sock')
+            self.assertEqual(doc['failures'][0]['detail'], 'not a regular file')
+        finally:
+            endpoint.close()
+            extra.close()
+        os.unlink(runtime / rel)
+        os.unlink(runtime / 'appdata/extra.sock')
+
+        parked = _listen(runtime, rel)
+        try:
+            self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', 'appdata/../../prov.sock'])
+            code, doc, _out = self.world.do_seal(self.world.root / 'sock-escape.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'ambiguous_path')
+            self.assertFalse(doc['asset_verified'])
+            outside = self.world.root / 'outside.sock'
+            foreign = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            foreign.bind(str(outside))
+            foreign.listen(1)
+            try:
+                self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', str(outside)])
+                code, doc, _out = self.world.do_seal(self.world.root / 'sock-outside.json')
+                self.assertEqual(code, 1, doc)
+                self.assertEqual(_failure(doc), 'unexpected_path')
+                self.assertFalse(doc['asset_verified'])
+            finally:
+                foreign.close()
+            self.world._write_launcher(424242, ['xr_3da', '-agent_bridge=appdata/prov.sock'])
+            code, doc, _out = self.world.do_seal(self.world.root / 'sock-glued.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'unexpected_path')
+            self.world._write_launcher(424242, ['xr_3da'])
+            code, doc, _out = self.world.do_seal(self.world.root / 'sock-unflagged.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'nonregular')
+            self.assertEqual(doc['failures'][0]['path'], rel)
+            self.assertEqual(doc['failures'][0]['detail'], 'not a regular file')
+            self.world._write_launcher(424242, ['-agent_bridge', rel])
+            code, doc, _out = self.world.do_seal(self.world.root / 'sock-argv0.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'nonregular')
+            self.assertEqual(doc['failures'][0]['detail'], 'not a regular file')
+        finally:
+            parked.close()
+        os.unlink(runtime / rel)
+
+        self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', rel])
+        code, doc, _out = self.world.do_seal(self.world.root / 'sock-missing.json')
+        self.assertEqual(code, 1, doc)
+        self.assertEqual(_failure(doc), 'nonregular')
+        self.assertIn('missing', doc['failures'][0]['detail'])
+
+        hidden = _listen(runtime, 'appdata/.bridge.sock')
+        try:
+            self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', 'appdata/.bridge.sock'])
+            code, doc, _out = self.world.do_seal(self.world.root / 'sock-dot.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'unexpected_path')
+            self.assertEqual(doc['failures'][0]['detail'], 'dotfile')
+        finally:
+            hidden.close()
+
+        elsewhere = self.world.root / 'elsewhere'
+        elsewhere.mkdir()
+        jumped = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        jumped.bind(str(elsewhere / 'sock'))
+        jumped.listen(1)
+        try:
+            (runtime / 'appdata/jump').symlink_to(elsewhere, target_is_directory=True)
+            self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', 'appdata/jump/sock'])
+            code, doc, _out = self.world.do_seal(self.world.root / 'sock-ancestor.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'symlink')
+            self.assertEqual(doc['failures'][0]['path'], 'appdata/jump')
+        finally:
+            jumped.close()
+
+    def test_bridge_socket_inode_is_launcher_identity(self):
+        rel = 'appdata/prov.sock'
+        sock = _listen(self.world.runtime, rel)
+        self.world._write_launcher(424242, ['xr_3da', '-agent_bridge', rel])
+        try:
+            code, sealed, seal_path = self.world.do_seal()
+            self.assertEqual(code, 0, sealed)
+            text = _csv(sealed['source_build'])
+        finally:
+            sock.close()
+        path = self.world.runtime.joinpath(*rel.split('/'))
+        os.unlink(path)
+        replacement = _listen(self.world.runtime, rel)
+        try:
+            status, doc, _capture, _before = self.world.do_attest(
+                seal_path, text, self.world.root / 'bridge-replaced.json')
+            self.assertEqual(status, 1, doc)
+            self.assertEqual(_failure(doc), 'launcher_identity')
+            self.assertIn('bridge socket', doc['failures'][0]['detail'])
+            self.assertFalse(doc['asset_verified'])
+            self.assertFalse(doc['measurement_accepted'])
+        finally:
+            replacement.close()
+
+    def test_live_observation_requires_the_bound_fd(self):
+        rel = 'appdata/prov.sock'
+        sock = _listen(self.world.runtime, rel)
+        pid = _unused_pid()
+        exe = os.path.realpath(self.world.exe)
+        images = [exe, os.path.realpath(self.world.dylib), os.path.realpath(OS_IMAGE)]
+
+        class Claim:
+            observation = 'live'
+
+            def alive(self, seen):
+                return seen == pid
+
+            def executable(self, seen):
+                return exe if seen == pid else None
+
+            def images(self, seen, deadline=None):
+                del deadline
+                return list(images) if seen == pid else None
+
+        try:
+            self.world._write_launcher(pid, ['xr_3da', '-agent_bridge', rel])
+            code, doc, _out = self.world.do_seal(self.world.root / 'live-unowned.json', process=Claim())
+            self.assertEqual(code, 2, doc)
+            self.assertEqual(_failure(doc), 'process_unverified')
+            self.assertFalse(doc['asset_verified'])
+            self.assertFalse(doc['live_runtime_attested'])
+        finally:
+            sock.close()
+
+    def test_stale_fd_does_not_own_the_replacement_inode(self):
+        rel = 'appdata/prov.sock'
+        first = _listen(self.world.runtime, rel)
+        leaf = self.world.runtime.joinpath(*rel.split('/'))
+        original = os.lstat(leaf).st_ino
+        os.unlink(leaf)
+        second = _listen(self.world.runtime, rel)
+        replacement = os.lstat(leaf).st_ino
+        second.close()
+        self.assertNotEqual(original, replacement)
+        self.world._write_launcher(os.getpid(), ['xr_3da', '-agent_bridge', rel])
+
+        class SimulatedLive(self.world.process_type):
+            """Image list is simulated. This is not a vmmap of the live pid."""
+
+            observation = 'live'
+            images_are_simulated = True
+
+        view = SimulatedLive(
+            os.getpid(), self.world.process.executable_path, list(self.world.process.image_paths))
+        self.assertTrue(view.images_are_simulated)
+        self.assertIs(SimulatedLive.images, self.world.process_type.images)
+        try:
+            self.assertTrue(_process_owns_bridge_socket(os.getpid(), [rel]))
+            record = _bridge_socket(
+                self.world.runtime.resolve(), json.loads(self.world.launcher.read_text()),
+                view, require_live_fd=True)
+            self.assertEqual(record['association'], 'path-only')
+            self.assertNotEqual(record['association'], 'live-fd')
+            self.assertEqual(record['ino'], str(replacement))
+            self.assertNotEqual(record['ino'], str(original))
+            code, doc, _out = self.world.do_seal(self.world.root / 'stale-fd.json', process=view)
+            self.assertEqual(code, 2, doc)
+            self.assertEqual(_failure(doc), 'process_unverified')
+            self.assertIn('current socket inode', doc['failures'][0]['detail'])
+            self.assertFalse(doc['asset_verified'])
+            self.assertFalse(doc['live_runtime_attested'])
+        finally:
+            first.close()
+
+    def test_current_socket_is_not_live_attested_without_inode_correlation(self):
+        rel = 'appdata/prov.sock'
+        sock = _listen(self.world.runtime, rel)
+        self.world._write_launcher(os.getpid(), ['xr_3da', '-agent_bridge', rel])
+
+        class SimulatedLive(self.world.process_type):
+            """Image list is simulated. This is not a vmmap of the live pid."""
+
+            observation = 'live'
+            images_are_simulated = True
+
+        view = SimulatedLive(
+            os.getpid(), self.world.process.executable_path, list(self.world.process.image_paths))
+        try:
+            self.assertTrue(view.images_are_simulated)
+            self.assertTrue(_process_owns_bridge_socket(os.getpid(), [rel]))
+            code, doc, _out = self.world.do_seal(self.world.root / 'current-fd.json', process=view)
+            self.assertEqual(code, 2, doc)
+            self.assertEqual(_failure(doc), 'process_unverified')
+            self.assertFalse(doc['live_runtime_attested'])
+            self.assertFalse(doc['asset_verified'])
+        finally:
+            sock.close()
+
+
+    def _bind_external(self, directory: Path, leaf: str = 'b.sock'):
+        path = directory / leaf
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.bind(str(path))
+        sock.listen(1)
+        return sock, path
+
+    def test_external_directory_seals_a_real_bound_socket(self):
+        with tempfile.TemporaryDirectory(prefix='oxv-', dir='/private/tmp') as name:
+            directory = Path(name)
+            directory.chmod(0o700)
+            self.assertEqual(os.path.realpath(directory), str(directory))
+            sock, endpoint = self._bind_external(directory)
+            try:
+                self.world._write_launcher(
+                    424242, ['xr_3da', '-agent_bridge', str(endpoint)],
+                    external_communication_directory=str(directory))
+                self.assertEqual(
+                    _ordinary_external_socket(
+                        ['-agent_bridge', 'xr_3da', '-agent_bridge', str(endpoint)], str(directory)),
+                    str(endpoint))
+                code, sealed, seal_path = self.world.do_seal()
+                self.assertEqual(code, 0, sealed)
+                info = os.lstat(endpoint)
+                parent = os.lstat(directory)
+                self.assertEqual(sealed['bridge_socket'], {
+                    'path': str(endpoint),
+                    'dev': str(info.st_dev),
+                    'ino': str(info.st_ino),
+                    'association': 'external-observation',
+                    'directory': {
+                        'path': str(directory),
+                        'dev': str(parent.st_dev),
+                        'ino': str(parent.st_ino),
+                        'mode': '0700',
+                        'uid': str(parent.st_uid),
+                    },
+                })
+                self.assertNotEqual(sealed['bridge_socket']['association'], 'live-fd')
+                self.assertFalse(sealed['live_runtime_attested'])
+                self.assertEqual(sealed['process_observation'], 'fixture')
+                self.assertNotIn(str(endpoint), [item['path'] for item in sealed['managed_files']])
+                echoed = inspect_runtime(
+                    self.world.runtime, self.world.launcher, config='Release',
+                    process=self.world.process, deadline=Deadline(30),
+                    external_communication_directory=str(directory))
+                self.assertEqual(echoed['bridge_socket']['association'], 'external-observation')
+                omitted = inspect_runtime(
+                    self.world.runtime, self.world.launcher, config='Release',
+                    process=self.world.process, deadline=Deadline(30))
+                self.assertEqual(omitted['bridge_socket']['path'], str(endpoint))
+                text = _csv(sealed['source_build'])
+                status, doc, _capture, _before = self.world.do_attest(
+                    seal_path, text, self.world.root / 'external-attest.json')
+                self.assertEqual(status, 0, doc)
+                self.assertTrue(doc['measurement_accepted'])
+                self.assertFalse(doc['live_runtime_attested'])
+            finally:
+                sock.close()
+
+    def test_external_directory_rejects_argv_overlap_symlink_mode_and_owner(self):
+        with tempfile.TemporaryDirectory(prefix='oxv-', dir='/private/tmp') as name:
+            directory = Path(name)
+            directory.chmod(0o700)
+            endpoint = directory / 'b.sock'
+            cases = [
+                (['xr_3da', '-agent_bridge', str(directory / 'other.sock'),
+                  '-agent_bridge', str(endpoint)], 'single ordinary'),
+                (['xr_3da', '-agent_bridge=' + str(endpoint)], 'single ordinary'),
+                (['xr_3da', '-agent_bridge', str(directory / 'a b.sock')], 'whitespace'),
+                (['xr_3da', '-agent_bridge', str(directory / ('a' * 120))], '103 bytes'),
+                (['xr_3da', '-agent_bridge', 'appdata/b.sock'], 'socket leaf'),
+                (['xr_3da'], 'single ordinary'),
+            ]
+            for index, (argv, detail) in enumerate(cases):
+                self.world._write_launcher(
+                    424242, argv, external_communication_directory=str(directory))
+                code, doc, _out = self.world.do_seal(self.world.root / f'argv-{index}.json')
+                self.assertEqual(code, 1, doc)
+                self.assertEqual(_failure(doc), 'external_directory')
+                self.assertIn(detail, doc['failures'][0]['detail'])
+                self.assertFalse(doc['asset_verified'])
+                self.assertFalse(doc['live_runtime_attested'])
+
+            runtime = os.path.realpath(self.world.runtime)
+            base = os.path.realpath(self.world.base)
+            appdata = os.path.realpath(self.world.runtime / 'appdata')
+            hold = self.world.runtime / 'hold'
+            hold.mkdir()
+            # The runtime contains appdata, so that ancestor hit is the settings closure.
+            # `hold` is inside the runtime and outside the settings and alias trees.
+            for index, (declared, detail) in enumerate((
+                (runtime, 'overlaps a settings closure'),
+                (base, 'overlaps a manifest root'),
+                (appdata, 'overlaps a settings closure'),
+                (os.path.realpath(hold), 'overlaps the runtime'),
+            )):
+                self.world._write_launcher(
+                    424242, ['xr_3da', '-agent_bridge', declared + '/b.sock'],
+                    external_communication_directory=declared)
+                code, doc, _out = self.world.do_seal(self.world.root / f'overlap-{index}.json')
+                self.assertEqual(code, 1, doc)
+                self.assertEqual(_failure(doc), 'external_directory')
+                self.assertIn(detail, doc['failures'][0]['detail'])
+
+            app = directory / 'App'
+            app.mkdir()
+            app.chmod(0o700)
+            exe = app / 'xr_3da'
+            exe.write_bytes(self.world.exe.read_bytes())
+            self.world._write_launcher(
+                424242, ['xr_3da', '-agent_bridge', str(app / 'b.sock')],
+                external_communication_directory=str(app), executable=str(exe))
+            code, doc, _out = self.world.do_seal(self.world.root / 'appdir.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'external_directory')
+            self.assertIn('application directory', doc['failures'][0]['detail'])
+
+            link = directory / 'link'
+            link.symlink_to(directory, target_is_directory=True)
+            self.world._write_launcher(
+                424242, ['xr_3da', '-agent_bridge', str(link / 'b.sock')],
+                external_communication_directory=str(link))
+            code, doc, _out = self.world.do_seal(self.world.root / 'symlink-dir.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'external_directory')
+            self.assertIn('symlink', doc['failures'][0]['detail'])
+
+            via_tmp = Path('/tmp') / directory.name
+            self.assertNotEqual(os.path.realpath(via_tmp), str(via_tmp))
+            self.world._write_launcher(
+                424242, ['xr_3da', '-agent_bridge', str(via_tmp / 'b.sock')],
+                external_communication_directory=str(via_tmp))
+            code, doc, _out = self.world.do_seal(self.world.root / 'alias-dir.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'external_directory')
+            self.assertIn('not canonical', doc['failures'][0]['detail'])
+
+            os.chmod(directory, 0o755)
+            self.world._write_launcher(
+                424242, ['xr_3da', '-agent_bridge', str(endpoint)],
+                external_communication_directory=str(directory))
+            code, doc, _out = self.world.do_seal(self.world.root / 'mode.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'external_directory')
+            self.assertIn('0700', doc['failures'][0]['detail'])
+            os.chmod(directory, 0o700)
+            with mock.patch('tools.frame_time_provenance.os.geteuid', return_value=os.geteuid() + 1):
+                code, doc, _out = self.world.do_seal(self.world.root / 'owner.json')
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(_failure(doc), 'external_directory')
+            self.assertIn('current uid', doc['failures'][0]['detail'])
+            self.assertFalse(doc['live_runtime_attested'])
+
+    def test_external_directory_keeps_in_tree_sockets_and_detects_replacement(self):
+        with tempfile.TemporaryDirectory(prefix='oxv-', dir='/private/tmp') as name:
+            directory = Path(name)
+            directory.chmod(0o700)
+            sock, endpoint = self._bind_external(directory)
+            extra = _listen(self.world.runtime, 'appdata/extra.sock')
+            try:
+                self.world._write_launcher(
+                    424242, ['xr_3da', '-agent_bridge', str(endpoint)],
+                    external_communication_directory=str(directory))
+                code, doc, _out = self.world.do_seal(self.world.root / 'extra.json')
+                self.assertEqual(code, 1, doc)
+                self.assertEqual(_failure(doc), 'nonregular')
+                self.assertEqual(doc['failures'][0]['path'], 'appdata/extra.sock')
+                self.assertFalse(doc['asset_verified'])
+            finally:
+                extra.close()
+                sock.close()
+            os.unlink(self.world.runtime / 'appdata/extra.sock')
+            os.unlink(endpoint)
+
+            sock, endpoint = self._bind_external(directory)
+            try:
+                code, sealed, seal_path = self.world.do_seal()
+                self.assertEqual(code, 0, sealed)
+                self.assertEqual(sealed['bridge_socket']['association'], 'external-observation')
+                text = _csv(sealed['source_build'])
+            finally:
+                sock.close()
+            os.unlink(endpoint)
+            replacement = self._bind_external(directory)[0]
+            try:
+                status, doc, _capture, _before = self.world.do_attest(
+                    seal_path, text, self.world.root / 'external-replaced.json')
+                self.assertEqual(status, 1, doc)
+                self.assertEqual(_failure(doc), 'launcher_identity')
+                self.assertIn('bridge socket', doc['failures'][0]['detail'])
+                self.assertFalse(doc['asset_verified'])
+                self.assertFalse(doc['measurement_accepted'])
+                self.assertFalse(doc['live_runtime_attested'])
+            finally:
+                replacement.close()
+
+    def test_external_directory_deadline_is_timeout(self):
+        with tempfile.TemporaryDirectory(prefix='oxv-', dir='/private/tmp') as name:
+            directory = Path(name)
+            directory.chmod(0o700)
+            sock, endpoint = self._bind_external(directory)
+            clock = {'now': 0.0}
+
+            def expire(path):
+                if str(path).startswith(str(directory)):
+                    clock['now'] = 1000.0
+
+            try:
+                self.world._write_launcher(
+                    424242, ['xr_3da', '-agent_bridge', str(endpoint)],
+                    external_communication_directory=str(directory))
+                code, doc, _out = self.world.do_seal(
+                    timeout_seconds=5, clock=lambda: clock['now'], after_lstat=expire)
+                self.assertEqual(code, 3, doc)
+                self.assertEqual(doc['result'], 'timeout')
+                self.assertEqual(_failure(doc), 'timeout')
+                self.assertFalse(doc['asset_verified'])
+                self.assertFalse(doc['measurement_accepted'])
+                self.assertFalse(doc['live_runtime_attested'])
+                with self.assertRaises(GateError) as caught:
+                    inspect_runtime(
+                        self.world.runtime, self.world.launcher, config='Release',
+                        process=self.world.process, deadline=Deadline(30),
+                        external_communication_directory=str(directory) + '-other')
+                self.assertEqual(caught.exception.code, 'external_directory')
+            finally:
+                sock.close()
+
+    def _refuse_case_alias(self, path: Path, detail: str, label: str,
+                           executable: str | None = None) -> bool:
+        alias = _case_alias(path)
+        real = os.path.realpath(path)
+        if alias is None:
+            swapped = Path(real).with_name(Path(real).name.swapcase())
+            if swapped.name != Path(real).name and (
+                    not swapped.exists() or not os.path.samefile(real, swapped)):
+                self.assertFalse(_directories_overlap(real, str(swapped)))
+                self.assertFalse(_directories_overlap(str(swapped), real))
+            return False
+        self.assertTrue(_directories_overlap(str(alias), real))
+        self.assertTrue(_directories_overlap(real, str(alias)))
+        self.world._write_launcher(
+            424242, ['xr_3da', '-agent_bridge', str(alias / 'b.sock')],
+            external_communication_directory=str(alias), executable=executable)
+        code, doc, _out = self.world.do_seal(self.world.root / f'case-{label}.json')
+        self.assertEqual(code, 1, doc)
+        self.assertEqual(_failure(doc), 'external_directory')
+        self.assertIn(detail, doc['failures'][0]['detail'])
+        self.assertFalse(doc['asset_verified'])
+        self.assertFalse(doc['measurement_accepted'])
+        self.assertFalse(doc['live_runtime_attested'])
+        return True
+
+    def test_external_directory_case_alias_uses_inode_identity(self):
+        with tempfile.TemporaryDirectory(prefix='oxv-ident-', dir='/private/tmp') as name:
+            parent = Path(name)
+            upper = parent / 'AbC'
+            upper.mkdir()
+            child = upper / 'Child'
+            child.mkdir()
+            sibling = parent / 'Zz'
+            sibling.mkdir()
+            self.assertTrue(_directories_overlap(str(upper), str(child)))
+            self.assertTrue(_directories_overlap(str(child), str(upper)))
+            self.assertFalse(_directories_overlap(str(child), str(sibling)))
+            self.assertFalse(_directories_overlap(
+                str(parent / 'NoSuch-AbC'), str(parent / 'nosuch-abc')))
+            other = parent / 'abc'
+            try:
+                other.mkdir()
+            except FileExistsError:
+                distinct = False
+            else:
+                distinct = not os.path.samefile(upper, other)
+            if distinct:
+                self.assertFalse(_directories_overlap(str(upper), str(other)))
+                self.assertFalse(_directories_overlap(str(other), str(child)))
+                self.assertFalse(_directories_overlap(str(child), str(other)))
+            else:
+                folded = parent / 'abc'
+                self.assertTrue(os.path.samefile(upper, folded))
+                self.assertEqual(os.path.realpath(folded), str(folded))
+                self.assertTrue(_directories_overlap(str(folded), str(upper)))
+                self.assertTrue(_directories_overlap(str(upper / 'child'), str(folded)))
+                self.assertTrue(_directories_overlap(str(folded / 'child'), str(upper)))
+                self.assertFalse(_directories_overlap(str(folded / 'child'), str(sibling)))
+
+            app = parent / 'App'
+            app.mkdir()
+            app.chmod(0o700)
+            exe = app / 'xr_3da'
+            exe.write_bytes(self.world.exe.read_bytes())
+            if not self._refuse_case_alias(app, 'application directory', 'app', executable=str(exe)):
+                spelled = Path(os.path.realpath(app)).with_name('aPP')
+                self.assertFalse(spelled.exists())
+                spelled.mkdir()
+                spelled.chmod(0o700)
+                sock, _endpoint = self._bind_external(spelled)
+                try:
+                    self.world._write_launcher(
+                        424242, ['xr_3da', '-agent_bridge', str(spelled / 'b.sock')],
+                        external_communication_directory=str(spelled), executable=str(exe))
+                    code, doc, _out = self.world.do_seal(self.world.root / 'case-distinct.json')
+                    self.assertEqual(code, 0, doc)
+                    self.assertEqual(doc['bridge_socket']['association'], 'external-observation')
+                    self.assertTrue(doc['asset_verified'])
+                    self.assertFalse(doc['live_runtime_attested'])
+                    self.assertFalse(_directories_overlap(str(app), str(spelled)))
+                finally:
+                    sock.close()
+
+        self._refuse_case_alias(self.world.base, 'manifest root', 'base')
+        self._refuse_case_alias(self.world.runtime / 'database', 'generated alias', 'database')
+        self._refuse_case_alias(self.world.runtime / 'appdata', 'settings closure', 'appdata')
+        notes = self.world.runtime / 'notes'
+        notes.mkdir()
+        self._refuse_case_alias(notes, 'runtime', 'notes')
+        self._refuse_case_alias(self.world.root, 'settings closure', 'root')
+
+    def test_external_directory_rechecks_identity_after_socket_observation(self):
+        with tempfile.TemporaryDirectory(prefix='oxv-race-', dir='/private/tmp') as name:
+            parent = Path(name)
+            directory = parent / 'comm'
+            directory.mkdir()
+            directory.chmod(0o700)
+            sock, endpoint = self._bind_external(directory)
+            moved = directory.with_name('comm-moved')
+            seal_only = parent / 'sealcomm'
+            seal_only.mkdir()
+            seal_only.chmod(0o700)
+            seal_sock, seal_endpoint = self._bind_external(seal_only)
+            seal_moved = seal_only.with_name('sealcomm-moved')
+
+            def restore_mode(folder: Path) -> None:
+                if folder.is_dir() and not folder.is_symlink():
+                    folder.chmod(0o700)
+
+            def chmod_during(path, folder=directory, leaf=endpoint):
+                if str(path) == str(leaf):
+                    folder.chmod(0o755)
+
+            replaced = {'done': False}
+
+            def replace_during(path, folder=directory, leaf=endpoint, target=moved, flag=replaced):
+                if str(path) == str(leaf) and not flag['done']:
+                    flag['done'] = True
+                    folder.rename(target)
+                    folder.symlink_to(target, target_is_directory=True)
+
+            try:
+                self.world._write_launcher(
+                    424242, ['xr_3da', '-agent_bridge', str(endpoint)],
+                    external_communication_directory=str(directory))
+                code, sealed, seal_path = self.world.do_seal(self.world.root / 'race-seal.json')
+                self.assertEqual(code, 0, sealed)
+                self.assertEqual(sealed['bridge_socket']['association'], 'external-observation')
+                self.assertFalse(sealed['live_runtime_attested'])
+                text = _csv(sealed['source_build'])
+
+                def assert_race(status, doc):
+                    self.assertEqual(status, 2, doc)
+                    self.assertEqual(doc['result'], 'unknown')
+                    self.assertEqual(_failure(doc), 'stat_race')
+                    self.assertIn('changed during inspection', doc['failures'][0]['detail'])
+                    self.assertFalse(doc['asset_verified'])
+                    self.assertFalse(doc['measurement_accepted'])
+                    self.assertFalse(doc['live_runtime_attested'])
+
+                code, doc, _out = self.world.do_seal(
+                    self.world.root / 'race-seal-mode.json', after_lstat=chmod_during)
+                assert_race(code, doc)
+                self.assertEqual(oct(directory.stat().st_mode & 0o777), '0o755')
+                restore_mode(directory)
+                status, doc, _capture, _before = self.world.do_attest(
+                    seal_path, text, self.world.root / 'race-attest-mode.json', after_lstat=chmod_during)
+                assert_race(status, doc)
+                self.assertEqual(oct(directory.stat().st_mode & 0o777), '0o755')
+                restore_mode(directory)
+
+                clock = {'now': 0.0}
+
+                def expire_socket(path, leaf=endpoint):
+                    if str(path) == str(leaf):
+                        clock['now'] = 1000.0
+
+                status, doc, _capture, _before = self.world.do_attest(
+                    seal_path, text, self.world.root / 'race-attest-deadline.json',
+                    timeout_seconds=5, clock=lambda: clock['now'], after_lstat=expire_socket)
+                self.assertEqual(status, 3, doc)
+                self.assertEqual(doc['result'], 'timeout')
+                self.assertEqual(_failure(doc), 'timeout')
+                self.assertFalse(doc['asset_verified'])
+                self.assertFalse(doc['measurement_accepted'])
+                self.assertFalse(doc['live_runtime_attested'])
+
+                status, doc, _capture, _before = self.world.do_attest(
+                    seal_path, text, self.world.root / 'race-attest-link.json', after_lstat=replace_during)
+                assert_race(status, doc)
+                self.assertTrue(directory.is_symlink())
+
+                seal_replaced = {'done': False}
+
+                def replace_seal(path, folder=seal_only, leaf=seal_endpoint, target=seal_moved,
+                                 flag=seal_replaced):
+                    if str(path) == str(leaf) and not flag['done']:
+                        flag['done'] = True
+                        folder.rename(target)
+                        folder.symlink_to(target, target_is_directory=True)
+
+                self.world._write_launcher(
+                    424242, ['xr_3da', '-agent_bridge', str(seal_endpoint)],
+                    external_communication_directory=str(seal_only))
+                code, doc, _out = self.world.do_seal(
+                    self.world.root / 'race-seal-link.json', after_lstat=replace_seal)
+                assert_race(code, doc)
+                self.assertTrue(seal_only.is_symlink())
+            finally:
+                sock.close()
+                seal_sock.close()
+                for link, target in ((directory, moved), (seal_only, seal_moved)):
+                    if link.is_symlink():
+                        link.unlink()
+                    leaf = target / 'b.sock'
+                    if leaf.exists():
+                        with contextlib.suppress(OSError):
+                            os.unlink(leaf)
+                    if target.is_dir() and not target.is_symlink():
+                        with contextlib.suppress(OSError):
+                            target.rmdir()
+
 
 class ParserHelperTests(unittest.TestCase):
     def test_macho_and_vmmap_helpers(self):
@@ -1144,6 +1907,104 @@ class ParserHelperTests(unittest.TestCase):
         self.assertIn('e3f273f04bf85b4b265004cbbc8a35f19796cd31', text)
         self.assertIn('source-identity.json', text)
         self.assertNotIn('build/runtime/coc', text)
+
+    def test_libproc_matches_a_socket_bound_by_this_process(self):
+        pid = os.getpid()
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            runtime = root / 'runtime'
+            (runtime / 'appdata').mkdir(parents=True)
+            relative = 'appdata/prov.sock'
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            previous = os.getcwd()
+            os.chdir(runtime)
+            try:
+                sock.bind(relative)
+                sock.listen(1)
+            finally:
+                os.chdir(previous)
+            try:
+                lexical = str(os.path.realpath(runtime / 'appdata' / 'prov.sock'))
+                self.assertTrue(_process_owns_bridge_socket(pid, [relative]))
+                self.assertFalse(_process_owns_bridge_socket(pid, [lexical]))
+                self.assertFalse(_process_owns_bridge_socket(pid, ['appdata/other.sock']))
+            finally:
+                sock.close()
+            absolute = root / 'abs.sock'
+            other = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            other.bind(str(absolute))
+            other.listen(1)
+            try:
+                self.assertTrue(_process_owns_bridge_socket(pid, [str(absolute)]))
+                self.assertFalse(_process_owns_bridge_socket(pid, ['abs.sock']))
+                self.assertFalse(_process_owns_bridge_socket(pid, [relative]))
+            finally:
+                other.close()
+
+    def test_socket_fdinfo_rejects_malformed_darwin_buffers(self):
+        pid = os.getpid()
+        with tempfile.TemporaryDirectory() as name:
+            runtime = Path(name) / 'runtime'
+            (runtime / 'appdata').mkdir(parents=True)
+            rel = 'appdata/b.sock'
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            previous = os.getcwd()
+            os.chdir(runtime)
+            try:
+                sock.bind(rel)
+                sock.listen(1)
+            finally:
+                os.chdir(previous)
+            try:
+                library = provenance._libproc()
+                self.assertIsNotNone(library)
+                raw = ctypes.create_string_buffer(4096)
+                got = library.proc_pidfdinfo(pid, sock.fileno(), 3, raw, 4096)
+                self.assertEqual(got, 792)
+                blob = raw.raw[:got]
+                self.assertEqual(int.from_bytes(blob[184:188], 'little'), 1)
+                self.assertEqual(int.from_bytes(blob[256:260], 'little'), 3)
+                self.assertEqual(blob[281], 1)
+                self.assertEqual(blob[282:].split(b'\0', 1)[0], rel.encode())
+                inode = os.lstat(runtime / 'appdata' / 'b.sock').st_ino
+                self.assertEqual(blob.find(inode.to_bytes(8, 'little')), -1)
+                listing = sock.fileno().to_bytes(4, 'little', signed=True) + (2).to_bytes(4, 'little')
+
+                def accepted(data: bytes, paths: list[str]) -> bool:
+                    class Stub:
+                        def proc_pidfdinfo(self, seen, fd, flavor, out, size):
+                            del seen, fd, flavor, size
+                            ctypes.memmove(out, data, len(data))
+                            return len(data)
+
+                    with mock.patch.object(provenance, '_libproc', return_value=Stub()), \
+                            mock.patch.object(provenance, '_pid_fd_bytes', return_value=listing):
+                        return provenance._process_owns_bridge_socket(pid, paths)
+
+                self.assertTrue(accepted(blob, [rel]))
+                wrong = bytearray(blob)
+                wrong[184:188] = (2).to_bytes(4, 'little')
+                wrong[256:260] = (2).to_bytes(4, 'little')
+                wrong[281] = 2
+                self.assertFalse(accepted(bytes(wrong), [rel]))
+                self.assertFalse(accepted(blob[:282 + len(rel) + 1], [rel]))
+                longpath = b'appdata/' + b'a' * 110
+                wide = bytearray(blob)
+                wide[282:282 + len(longpath) + 1] = longpath + b'\0'
+                self.assertFalse(accepted(bytes(wide), [longpath.decode()]))
+            finally:
+                sock.close()
+
+    def test_nbsp_stays_inside_the_agent_bridge_token(self):
+        path = 'appdata/a\u00a0b.sock'
+        self.assertEqual(_agent_bridge_token(['exe', '-agent_bridge', path]), path)
+        self.assertNotEqual(_agent_bridge_token(['exe', '-agent_bridge', path]), 'appdata/a')
+        for space in (' ', '\t', '\n', '\v', '\f', '\r'):
+            self.assertEqual(
+                _agent_bridge_token(['exe', '-agent_bridge' + space + 'appdata/x.sock']),
+                'appdata/x.sock')
+        self.assertEqual(_agent_bridge_token(['exe', '-agent_bridge']), '')
+        self.assertIsNone(_agent_bridge_token(['-agent_bridge', path]))
 
 
 def _unused_pid() -> int:
