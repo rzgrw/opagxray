@@ -1,4 +1,4 @@
-> **SUPERSEDED (status reconciled 2026-11-07).** Historical SP1→SP2 guide. Metal M-R0/menu shipped and M-R1 is parked; Vulkan has not started. AI on GL is current. Use [PLAN_STATUS](../PLAN_STATUS.md) and [HANDOVER](../HANDOVER.md), not the historical next steps below.
+> **SUPERSEDED (status reconciled 2026-11-07).** Historical SP1→SP2 guide. Metal M-R0/menu shipped and M-R1 is parked; Vulkan has not started. GL stability/frame-time work is current, with AI expansion queued behind it. Development has moved to Windows 11 ([WINDOWS_HANDOFF](../WINDOWS_HANDOFF.md)); the repository is now the detached fork `https://github.com/rzgrw/opagxray` with only `main`/`dev` branches, so the `OpenXVibeRay` URL, `/Users/rz/...` paths and branch references below are historical. Use [PLAN_STATUS](../PLAN_STATUS.md) and [HANDOVER](../HANDOVER.md), not the historical next steps below.
 
 # Viberay macOS Port — Continuation Guide
 

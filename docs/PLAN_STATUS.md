@@ -2,11 +2,16 @@
 
 ## Windows transfer — 2026-11-07
 
-Current execution is moving to Windows. Read [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md) before resuming: it records the reviewed menu repair, final Mac runtime results, WIP provenance/overhead branches, Windows bridge/export/build gaps and transfer recovery instructions. Historical checklist and benchmark claims remain subject to their original platform/evidence limits.
+Current execution is moving to Windows. Read [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md) before resuming: it records the reviewed menu repair, final Mac runtime results, WIP provenance/overhead branches, Windows bridge/export/build gaps and transfer recovery instructions. Historical checklist and benchmark claims remain subject to their original platform/evidence limits. All build/test/live results recorded below are macOS runs; none has been repeated on Windows.
 
-Reconciled against local `dev` baseline `8984220b6`; Git refs and source presence
-were checked, but no build, game, provider, or acceptance test was run for this
-inventory. **Stability and frame-time consistency on OpenGL are the current priority.** Historical checkboxes are
+## Repository and branch policy — 2026-11-07
+
+- The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray), now **detached** from OpenXRay's GitHub fork network. This supersedes the earlier "no GitHub detachment has occurred" wording here and in the handoff. OpenXRay and IXRay remain inspiration and selective donors: no PR flow upstream, upstream intake only as reviewed, attributed, license-compatible changes.
+- Only two long-lived branches: `main` (stable; `<main-sha TBD>`, not yet created) and `dev` (experimental; all work lands here first). Other branches (`codex/*`, `feat/metal-*`, `rzgrw/frame-overhead-*`, `transfer/windows-2026-11-07`) are being archived/removed; SHAs cited below for them are historical recovery references, not merge candidates.
+
+Reconciled against local `dev` at `950a7820b` (2026-11-07 doc refresh; earlier
+inventory baseline was `8984220b6`). Git refs and source presence were checked,
+but no build, game, provider, or acceptance test was run for this inventory. **Stability and frame-time consistency on OpenGL are the current priority.** Historical checkboxes are
 not a code inventory: unchecked steps can already be implemented, and checked
 steps do not establish acceptance on today's runtime.
 
@@ -44,6 +49,8 @@ history rather than instructions to replay every commit.
 | [Thin actor harness](superpowers/plans/2026-07-07-llm-thin-harness-ai.md) | Shipped: `b38c943fb`…`589be8ff9`; intent codec, actors, actuator command ledger, runtime and bridge. |
 | [Session mutant packs](superpowers/plans/2026-07-08-mutant-pack-session-spawn.md) | Shipped: `a374e6bc9`, `558f73348`, `0e494f6a9`, observability fix `ccd8713b8`; registry/spawn seam, not complete live AI ownership. |
 | [Async actor provider](superpowers/plans/2026-07-14-async-live-actor-provider.md) | Shipped: `9cf56d00c`, `e19a9a47d`, `f66aafd34`, contract hardening `96142b7c0`; fresh hardened-prompt non-coast acceptance still open. |
+| [Frame-time measurement](superpowers/plans/2026-11-07-frame-time-measurement.md) | Shipped infrastructure: recorder/reports `e3f273f04`, opt-in GL telemetry + `perf.*` bridge export `a389540d8`, readiness/visibility classification `456808010`, provenance sidecars `90c6e57e6`. No accepted capture or measured gain; Windows export unavailable. Overhead experiment is WIP outside `dev`. |
+| Menu reload repair | Shipped: `604fb0690` (failure ownership, activation-effect restore, `xrMainMenuReloadTests`). Recorded macOS focused/sanitizer tests and two private live saved-load lifecycles; root cause of the wrong factory type unknown; Windows unverified. |
 | [Metal SP2](superpowers/plans/2026-03-29-sp2-metal-renderer.md) | M-R0/menu shipped (`1ed42b1f1`, merge `4dba4ecd1`); M-R1 parked at unmerged `caa2e4953`. Resume details in [HANDOVER](HANDOVER.md). |
 | [Vulkan](superpowers/specs/2026-07-05-vulkan-renderer-roadmap.md) | Not started; native-renderer work paused. Metal on Mac / Vulkan on PC remains the long-term direction. |
 | [Gate 1 authority spine](superpowers/plans/2026-07-14-garbage-ai-authority-spine.md) | Task 1 selectively recovered and integrated at `04b4ef5b5` after independent review. Tasks 2 onward are not integrated; further AI expansion follows the runtime comparison. |
@@ -52,7 +59,7 @@ history rather than instructions to replay every commit.
 ## Gate 1 recovery and remaining gates
 
 `origin/codex/ai-authority-spine-gate1` locally resolves to `1d951aa07` and is
-**unmerged**. It contains partial Tasks 1–10 from `facec9eb9` / `3cf0a8543` plus
+**unmerged** (the branch is being archived under the branch policy; recover by SHA). It contains partial Tasks 1–10 from `facec9eb9` / `3cf0a8543` plus
 the standalone test seam at `1d951aa07`. This is recovery material, not a branch
 ready to merge or proof that all tasks are executable as written. The separate
 `f1222d148` reanimation document's Gemini/model/version-ladder changes are
@@ -94,7 +101,7 @@ network/provider availability check was performed.
 
 The standalone recorder/report checkpoint is `e3f273f04`. Runtime loop and GL CPU spans, main-thread bridge controls, and exclusive stopped-only export have independently reviewed implementation and a full GL build plus private Cordon functional run. Coordinator reran three CMake test executables and 64 Python tests, with reviewed source/runtime hashes matched. This is measurement infrastructure, not a measured speedup. The current capture intentionally fails acceptance for unknown content/overlay provenance; classification edge cases, an independent overhead reference, repeated performance captures and equivalent donor timing remain open. See the [measurement plan](superpowers/plans/2026-11-07-frame-time-measurement.md).
 
-The [OpenXRay adoption audit](OPENXRAY_PERFORMANCE_AUDIT_2026-11-07.md) and [physics audit](OPENXRAY_PHYSICS_PERFORMANCE_AUDIT_2026-11-07.md) rank selective candidates. Grass shadow culling is a performance experiment; shared-string ownership and smaller GL/game guards are correctness candidates. OPCODE/Jolt replacements are deferred on current evidence. Independence means our own roadmap and release authority while selective future upstream intake remains possible; no GitHub detachment, remote, or license change has occurred.
+The [OpenXRay adoption audit](OPENXRAY_PERFORMANCE_AUDIT_2026-11-07.md) and [physics audit](OPENXRAY_PHYSICS_PERFORMANCE_AUDIT_2026-11-07.md) rank selective candidates. Grass shadow culling is a performance experiment; shared-string ownership and smaller GL/game guards are correctness candidates. OPCODE/Jolt replacements are deferred on current evidence. Independence means our own roadmap and release authority while selective future upstream intake remains possible. The GitHub fork relationship has since been detached (repository `rzgrw/opagxray`); no license change has occurred.
 
 ### Classification follow-up
 

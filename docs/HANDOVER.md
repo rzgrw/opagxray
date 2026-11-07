@@ -1,13 +1,15 @@
 # OpenXVibeRay — Handover
 
-**Last updated:** 2026-11-07 (status reconciliation against `8984220b6`)
+**Last updated:** 2026-11-07 (status refresh against `dev` `950a7820b`; detached fork, Windows continuation)
 **Written for:** a fresh coding agent (Codex) or engineer picking this repo up with zero prior context.
 
 ---
 
 ## 0. TL;DR — current direction
 
-Read [PLAN_STATUS.md](PLAN_STATUS.md) first for shipped refs, historical evidence, recovery order, and open acceptance. Runtime observations below were recorded in earlier sessions; this reconciliation did not rebuild or rerun them.
+Read [PLAN_STATUS.md](PLAN_STATUS.md) first for shipped refs, historical evidence, recovery order, and open acceptance. Development is moving to **Windows 11**; read [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md) before building or testing there. Runtime observations below were recorded on macOS in earlier sessions; this refresh did not rebuild or rerun them.
+
+The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray), a **detached fork**: OpenXRay/IXRay are inspiration and selective donors, with no upstream PR flow.
 
 Two things guide current work:
 
@@ -23,19 +25,25 @@ Original AI design (refined by the thin-harness and authority-spine specs linked
 
 ## 1. Repo state & branches
 
-| Branch | State | Notes |
+**Branch policy:** only `main` (stable; `<main-sha TBD>`, not yet created) and `dev` (experimental; all work lands here). Every other branch is being archived/removed; the refs below are historical recovery points, cited by SHA.
+
+| Ref | State | Notes |
 |---|---|---|
-| `dev` | reconciled baseline `8984220b6`; M-R0, AI harness, and IXRay foundation shipped | base for selective AI recovery |
-| `origin/codex/ai-authority-spine-gate1` | unmerged recovery source at `1d951aa07` | partial Tasks 1–10; not ready to merge, no Gate 1 completion claim |
+| `dev` | `950a7820b`; M-R0, AI harness, IXRay foundation, Task 1, frame-time telemetry/provenance, menu reload repair, Windows handoff | the only working branch |
+| `main` | `<main-sha TBD>` | stable line; not yet created |
+| `1d951aa07` (was `codex/ai-authority-spine-gate1`) | unmerged recovery source | partial Tasks 1–10; not ready to merge, no Gate 1 completion claim |
 | Task 1 canonical state | integrated at `04b4ef5b5` | independently reviewed and tested; authority/commit remain queued after the runtime comparison |
-| `feat/metal-mr0-first-frame` | **merged to dev** via PR [#9](https://github.com/rzgrw/OpenXVibeRay/pull/9) | Metal renders the CoC main menu. GL/DX11 untouched. |
-| `feat/metal-mr1-ingame` | pushed WIP (`caa2e4953`), **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. Branched off the pre-merge M-R0 tip — rebase onto current `dev` when resuming. |
+| `feat/metal-mr0-first-frame` | **merged to dev** via PR #9 (repository was then named `OpenXVibeRay`) | Metal renders the CoC main menu. GL/DX11 untouched. |
+| `caa2e4953` (was `feat/metal-mr1-ingame`) | WIP, **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. Branched off the pre-merge M-R0 tip — rebase onto current `dev` when resuming. |
+| `rzgrw/frame-overhead-base` / `-reference` | WIP experiments | recover selectively per [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md); never merge wholesale |
 
 All Metal changes are `USE_METAL`/`SM_METAL`-gated, so **GL and DX11 output is unchanged** on every branch.
 
 ---
 
 ## 2. Build
+
+Windows 11 (current development machine): **not yet verified** on current `dev`. See [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md#windows-build-reality-and-first-checks). The MSBuild `src/engine.sln` route lacks this fork's CMake-only sources (`xrEngine.vcxproj` lists no `AgentBridge`, `xrSim`, or `FrameTime*` files) and the Windows CMake CI entries are commented out. Rebuild all engine/game modules together; `IGame_Level`/`MainMenu` layouts changed in `604fb0690`.
 
 macOS (Apple Silicon):
 
@@ -58,7 +66,7 @@ Hard constraint — **`XRAY_EXCEPTIONS=0` on Darwin** (`src/CMakeLists.txt`): C+
 
 ## 3. Run & test (the agent bridge is the harness)
 
-The engine is self-testable over a Unix socket. This is how you (an agent) drive and observe the game.
+The engine is self-testable over a Unix socket. This is how you (an agent) drive and observe the game on macOS/Linux. On Windows the bridge is a stub (`AgentBridge.cpp` implements only the non-`XR_PLATFORM_WINDOWS` path) and frame-time export returns `export_unavailable`; a Windows control transport is an explicit open task.
 
 ### 3.1 Private runtime and launch
 
@@ -77,6 +85,21 @@ The original ignored artifacts and execution worktree are now absent: this is
 historical evidence, not a current rerun. Full five-run GL/20-minute idle,
 direct empty-group execution, sustained vsync-on gameplay, current private pack
 verification, and hardened live non-coast acceptance remain open.
+
+Later macOS records: telemetry/classification work (`a389540d8`, `456808010`) ran a
+full GL build and private Cordon functional runs, and the menu reload repair
+(`604fb0690`) passed focused/sanitizer tests plus two private live saved-load
+lifecycles with exit 0 (see PLAN_STATUS and WINDOWS_HANDOFF). Frame-time captures
+still fail asset-provenance acceptance; no performance number exists.
+
+### 3.2a Frame-time telemetry (opt-in)
+
+Bridge verbs `perf.start`, `perf.status`, `perf.stop`, `perf.reset`, `perf.export`
+(export only when stopped; exclusive, no-overwrite). Analyse with
+`tools/frame_time_report.py`; attest assets with `tools/frame_time_provenance.py`
+(macOS process inspection only). Design: [measurement](superpowers/specs/2026-11-07-frame-time-measurement-design.md),
+[provenance](superpowers/specs/2026-11-07-frame-time-provenance-design.md),
+[overhead](superpowers/specs/2026-11-07-frame-time-overhead-design.md).
 
 ### 3.3 Bridge and GL gate
 
@@ -212,6 +235,7 @@ Current boundary / next AI milestone:
 
 ## 7. Where the detailed context lives
 - Current inventory and recovery gates: [PLAN_STATUS.md](PLAN_STATUS.md)
+- Windows transfer and next-session order: [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md)
 - Roadmap / vision: `docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md`
 - AI design: `docs/superpowers/specs/2026-07-05-agentic-zone-design.md`
 - macOS setup: `docs/macos-dev-setup.md`

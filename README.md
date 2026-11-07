@@ -1,14 +1,20 @@
 # OpenXVibeRay
 
-OpenXVibeRay is a fork of [OpenXRay](https://github.com/OpenXRay/xray-16) that treats the original X-Ray Engine as foundation, not scripture. The goal is to turn S.T.A.L.K.E.R.'s engine into a modern, self-testable, agent-driven runtime: stable on macOS today, moving toward native Metal/Vulkan rendering, and replacing old game AI with LLM-authored world simulation.
+OpenXVibeRay is a detached fork of [OpenXRay](https://github.com/OpenXRay/xray-16) that treats the original X-Ray Engine as foundation, not scripture. The goal is to turn S.T.A.L.K.E.R.'s engine into a modern, self-testable, agent-driven runtime with consistent frame times, moving toward native Metal/Vulkan rendering, and replacing old game AI with LLM-authored world simulation.
 
 This is an engine project. It does not include S.T.A.L.K.E.R. game data, assets, or proprietary content.
 
+## Repository
+
+- Home: [github.com/rzgrw/opagxray](https://github.com/rzgrw/opagxray). It is no longer a member of OpenXRay's GitHub fork network.
+- Upstream relationship: OpenXRay (and IXRay) are inspiration and selective donors. There is no PR flow upstream; upstream fixes are taken in individually, reviewed, attributed, and with license notices preserved.
+- Branches: `main` is stable (`<main-sha TBD>`, not yet created); `dev` is experimental and receives all new work. No other long-lived branches.
+
 ## Current Status
 
-Last updated: 2026-07-08.
+Last updated: 2026-11-07. Detailed inventory: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md).
 
-The working runtime is **OpenGL on macOS**, driven through the shipped **agent bridge**. Renderer replacement is paused while the AI rehaul lands on top of the stable GL baseline.
+The working runtime is **OpenGL**, verified so far on **macOS** and driven through the shipped **agent bridge**. Development is moving to **Windows 11**; the Windows build and runtime are not yet verified on current `dev` (see [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md)). The current priority is **stability and frame-time consistency**; renderer replacement and further AI authority work are held behind it.
 
 The active AI direction is:
 
@@ -30,12 +36,17 @@ What works now:
   - `agent.pack.wake <pack_id>`
   - `agent.pack.commands`
 - A verified live session spawn path for `dog_weak` packs, including pack registration, observation, wake, and accepted actuator command output.
+- Asynchronous, cancellable live actor/pack provider wakes off the frame thread (`agent.actor.poll`).
+- Library-level canonical Zone state for the authority spine (Gate 1 Task 1).
+- Opt-in frame-time telemetry: `perf.*` bridge verbs, `tools/frame_time_report.py`, and provenance sidecars via `tools/frame_time_provenance.py`. This is measurement infrastructure; no performance gain has been measured yet.
+- Main-menu reload failure handling that no longer crashes on a rejected UI factory object (macOS-verified).
 
 What is not done yet:
 
-- Full replacement of legacy stalker/monster AI.
-- Full ALife ownership for spawned LLM packs.
-- Async frame-safe provider runtime for frequent live model wakes.
+- Windows build, agent bridge transport, and telemetry export (the Windows bridge is a stub).
+- Accepted frame-time captures and any measured comparison with IXRay/OpenXRay.
+- Full replacement of legacy stalker/monster AI and full ALife ownership for spawned LLM packs.
+- Authority-spine Tasks 2+ and a fresh live non-coast provider acceptance run.
 - Native Metal in-game renderer parity.
 - Vulkan renderer bring-up.
 
@@ -73,7 +84,7 @@ See [docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md](docs/superpowers/sp
 
 Primary development target:
 
-- Call of Chernobyl 1.4.22 on macOS, OpenGL renderer.
+- Call of Chernobyl (1.4.12 base + 1.4.22 patch), OpenGL renderer. Historical verification is on macOS; Windows 11 is the active development machine, not yet verified.
 
 Upstream compatibility goals:
 
@@ -82,6 +93,10 @@ Upstream compatibility goals:
 - Linux and Windows OpenXRay targets
 
 The AI bridge and current live-session pack work are being developed and verified against Call of Chernobyl first.
+
+## Build on Windows
+
+Not yet verified on current `dev`. The existing CI recipe is Visual Studio 2022 / MSBuild on `src/engine.sln`, but the checked-in `.vcxproj` files do not list this fork's CMake-only sources (agent bridge, xrSim, frame-time telemetry), and Windows CMake CI is disabled. See [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) for the current state, platform gaps, and first checks.
 
 ## Build on macOS
 
@@ -94,8 +109,8 @@ brew install cmake ccache sdl2 lzo libogg libvorbis theora openal-soft jpeg-turb
 Clone and initialize submodules:
 
 ```bash
-git clone https://github.com/rzgrw/OpenXVibeRay.git
-cd OpenXVibeRay
+git clone https://github.com/rzgrw/opagxray.git
+cd opagxray
 git submodule update --init --recursive
 ```
 
@@ -162,7 +177,7 @@ Full macOS setup and troubleshooting live in [docs/macos-dev-setup.md](docs/maco
 
 ## Agent Bridge
 
-The bridge is the standard verification harness. Launch with:
+The bridge is the standard verification harness on macOS/Linux (Unix socket; the Windows implementation is currently a stub). Launch with:
 
 ```bash
 cd /path/to/game
@@ -284,6 +299,8 @@ cmake --build build --target xrSimWorldStateTests -j10
 bin/arm64/Release/xrSimWorldStateTests
 ```
 
+Other focused test targets (all `EXCLUDE_FROM_ALL`; build by name): `xrSimAuthoritySpineTests`, `xrUIShaderCacheTests`, `xrFrameTimeCollectorTests`, `xrFrameTimeCollectorBoundaryTests`, `xrFrameTimeSessionTests`, `xrMainMenuReloadTests`. Python tooling tests live in `tools/tests/`; some exercise POSIX/Darwin behavior and are not expected to pass unchanged on Windows.
+
 Run the AI thin-harness bridge script in a live engine session:
 
 ```bash
@@ -354,7 +371,9 @@ docs/
 
 ## Important Docs
 
+- [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md) - current inventory, shipped refs, and open acceptance.
 - [docs/HANDOVER.md](docs/HANDOVER.md) - current project handover and resume guide.
+- [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) - Windows transfer, build reality, and next steps.
 - [docs/macos-dev-setup.md](docs/macos-dev-setup.md) - macOS build/run/bridge setup.
 - [docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md](docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md) - renderer and engine roadmap.
 - [docs/superpowers/specs/2026-07-05-agentic-zone-design.md](docs/superpowers/specs/2026-07-05-agentic-zone-design.md) - agentic Zone architecture.
