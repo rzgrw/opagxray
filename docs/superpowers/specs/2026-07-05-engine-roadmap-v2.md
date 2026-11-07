@@ -22,7 +22,7 @@ A platform-agnostic rebuild of the X-Ray engine with **DUAL-NATIVE renderers** (
 | Agent bridge | Shipped; verification uses explicit private runtime paths from [macOS setup](../../macos-dev-setup.md). |
 | Metal | M-R0/menu shipped; M-R1 parked at unmerged `caa2e4953`. Native-renderer work paused. |
 | Vulkan | Not started; long-term Linux/Windows renderer, MoltenVK only a development vehicle. |
-| AI on GL | Current priority. Foundation, HTTP, thin actor harness, packs, and async actor wakes shipped; Gate 1 Task 1 recovery active separately, Gate 1 incomplete. |
+| AI on GL | Foundation, HTTP, thin actor harness, packs, async actor wakes and Gate 1 Task 1 canonical state (`04b4ef5b5`) shipped. Further AI expansion follows the current runtime stability/performance comparison; Gate 1 incomplete. |
 
 The unmerged Gate 1 source at `1d951aa07` requires selective recovery and contract
 reconciliation, not a wholesale merge. The `f1222d148` Gemini/model/version-ladder

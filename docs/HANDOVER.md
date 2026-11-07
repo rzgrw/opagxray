@@ -12,9 +12,9 @@ Read [PLAN_STATUS.md](PLAN_STATUS.md) first for shipped refs, historical evidenc
 Two things guide current work:
 
 1. **OpenGL is the working runtime.** The game boots, renders, and is fully playable on the GL backend (`renderer renderer_r3`). This is the baseline for everything below.
-2. **The active focus is the AI rehaul, developed on top of GL.** The renderer rewrite (native Metal / Vulkan) is **paused**. We are not blocked on graphics — GL is good enough to build the AI-driven Zone on top of. Metal M-R0 (menu) shipped; Metal M-R1 (in-game) is parked mid-flight with a clean resume guide (§4).
+2. **The immediate focus is GL stability and frame-time consistency compared with IXRay.** AI development stays on GL; Task 1 canonical state is integrated, and further AI expansion follows the comparison. The renderer rewrite (native Metal / Vulkan) is **paused**. We are not blocked on graphics — GL is good enough to build the AI-driven Zone on top of. Metal M-R0 (menu) shipped; Metal M-R1 (in-game) is parked mid-flight with a clean resume guide (§4).
 
-So: **build GL, run GL, build the AI on GL.** Pick up Metal later from §4 if/when someone wants to resume the native-renderer track.
+So: **build GL, measure GL, preserve the AI-on-GL direction.** Pick up Metal later from §4 if/when someone wants to resume the native-renderer track.
 
 Historical roadmap for the overall vision (renderer-first sequencing superseded): [`docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md`](superpowers/specs/2026-07-05-engine-roadmap-v2.md).
 Original AI design (refined by the thin-harness and authority-spine specs linked in the inventory): [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
@@ -27,7 +27,7 @@ Original AI design (refined by the thin-harness and authority-spine specs linked
 |---|---|---|
 | `dev` | reconciled baseline `8984220b6`; M-R0, AI harness, and IXRay foundation shipped | base for selective AI recovery |
 | `origin/codex/ai-authority-spine-gate1` | unmerged recovery source at `1d951aa07` | partial Tasks 1–10; not ready to merge, no Gate 1 completion claim |
-| `ai-authority-manifest` | Task 1 recovery active separately | manifest/canonical state first; authority and reconciled codec/atomic commit follow |
+| Task 1 canonical state | integrated at `04b4ef5b5` | independently reviewed and tested; authority/commit remain queued after the runtime comparison |
 | `feat/metal-mr0-first-frame` | **merged to dev** via PR [#9](https://github.com/rzgrw/OpenXVibeRay/pull/9) | Metal renders the CoC main menu. GL/DX11 untouched. |
 | `feat/metal-mr1-ingame` | pushed WIP (`caa2e4953`), **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. Branched off the pre-merge M-R0 tip — rebase onto current `dev` when resuming. |
 
@@ -125,7 +125,7 @@ The running game loads GLSL from a **copy** at `<CoC gamedata>/shaders/gl/`, **n
 
 ## 5. The active work — AI implementation on GL
 
-The active continuation is selective **Gate 1 authority-spine recovery**, after the shipped xrSim/actor foundation. Read [PLAN_STATUS.md](PLAN_STATUS.md#gate-1-recovery-and-remaining-gates) for order and unresolved Task 3 contracts. Original agentic-Zone design: [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
+**Gate 1 Task 1 canonical state is integrated** at `04b4ef5b5`; further authority-spine recovery follows the current stability/performance investigation. Read [PLAN_STATUS.md](PLAN_STATUS.md#gate-1-recovery-and-remaining-gates) for order and unresolved Task 3 contracts. Original agentic-Zone design: [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
 
 Shape of it (per the spec and the design decisions in project memory):
 - The Zone is **simulated by LLM agents** (persistent `WorldAgents`) that own world evolution. This is a **complete simulation rewrite**, not a sidecar: legacy ALife becomes the compatibility/materialization surface while `xrMind` + `xrSim` take over world authority.

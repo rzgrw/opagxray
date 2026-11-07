@@ -4,8 +4,8 @@
 
 OpenXVibeRay is a fork of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The original engine is **inspiration and foundation, not scripture**. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision.
 
-- **Runtime:** OpenGL is the working baseline and **AI on GL is the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953`, Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
-- **AI:** xrSim foundation, HTTP transport, thin actor harness, session packs, and async actor wakes are shipped. Gate 1 authority-spine Task 1 recovery is active separately; Gate 1 is not complete. See the inventory before restarting old plans.
+- **Runtime:** OpenGL is the working baseline and **stability and frame-time consistency are the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953`, Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
+- **AI:** xrSim foundation, HTTP transport, thin actor harness, session packs, and async actor wakes are shipped. Gate 1 Task 1 canonical state is integrated at `04b4ef5b5`; further AI expansion follows the runtime comparison. Gate 1 is not complete. See the inventory before restarting old plans.
 - **Agent bridge (shipped):** launch with `-agent_bridge`, drive via `tools/agentctl.py` — Claude can run, control, and screenshot the game itself. This is the standard verification harness.
 
 ## Architecture
@@ -83,6 +83,6 @@ Verbs: `hello/cmd/lua/key/mouse/state/shot/bye`. A private-save scenario coverin
 
 - **Baseline:** `dev` at `8984220b6` includes the IXRay foundation guards, UI comparator, private stager, and frame-wait harness.
 - **Evidence:** 41 Python tests, two C++ targets, and the vsync-off Cordon gate are historical records; the original ignored artifacts/worktree are absent. They are not current reruns.
-- **Recovery:** unmerged Gate 1 branch `1d951aa07` is partial recovery material; Task 1 is active in `ai-authority-manifest`, followed by authority and reconciled strict codec/atomic commit work.
+- **Recovery:** unmerged Gate 1 branch `1d951aa07` is partial recovery material; Task 1 is integrated at `04b4ef5b5`. Authority and strict codec/atomic commit remain queued behind the stability/performance comparison.
 - **Open acceptance:** hardened live non-coast prompt, current private packs, five-run GL/20-minute idle, direct empty-group path, and sustained vsync-on gameplay; Gate 1 has further replay/soak/live gates.
 - **Provider policy:** `claude-sonnet-5` is a historical value requiring official availability verification before live use; this reconciliation approves no provider/model substitution.

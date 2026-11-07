@@ -1,6 +1,6 @@
 # Garbage AI Authority Spine Implementation Plan
 
-> **Status reconciliation (2026-11-07):** RECOVERY ACTIVE, NOT COMPLETE. Gate 1 is absent from baseline `8984220b6`; unmerged `1d951aa07` contains partial Tasks 1–10. Task 1 recovery is active separately in `ai-authority-manifest`; Task 2 can follow, while Task 3 contracts need reconciliation. This plan is not executable wholesale as written. Repository C++20 is unchanged; C++17 examples are a portable subset. Historical `claude-sonnet-5` requires official availability verification; no provider/model substitution is approved. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+> **Status reconciliation (2026-11-07):** RECOVERY ACTIVE, NOT COMPLETE. Gate 1 is absent from baseline `8984220b6`; unmerged `1d951aa07` contains partial Tasks 1–10. Task 1 recovery is integrated at `04b4ef5b5`; Task 2 follows the current runtime stability/performance comparison, while Task 3 contracts need reconciliation. This plan is not executable wholesale as written. Repository C++20 is unchanged; C++17 examples are a portable subset. Historical `claude-sonnet-5` requires official availability verification; no provider/model substitution is approved. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
