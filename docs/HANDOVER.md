@@ -35,8 +35,8 @@ Original AI design (refined by the thin-harness and authority-spine specs linked
 | Task 1 canonical state | integrated at `04b4ef5b5` | independently reviewed and tested; authority/commit remain queued after the runtime comparison |
 | `feat/metal-mr0-first-frame` (historical, deleted) | **merged to dev** via PR #9 (repository was then named `OpenXVibeRay`) | Metal renders the CoC main menu. GL/DX11 untouched. |
 | tag `archive/feat/metal-mr1-ingame` → `caa2e4953` | WIP, **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. Branched off the pre-merge M-R0 tip — rebase onto current `dev` when resuming. |
-| tags `archive/rzgrw/frame-overhead-base` → `617957470`, `archive/rzgrw/frame-overhead-reference` → `d603c01d2` | WIP experiments | recover selectively per [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md); never merge wholesale |
-| tag `archive/transfer/windows-2026-11-07` → `d336361d1` | transfer snapshot | only copy of `docs/transfer/2026-11-07/` evidence and provenance WIP `8cf2af572`; recover selectively |
+| tags `archive/rzgrw/frame-overhead-base` → `617957470`, `archive/rzgrw/frame-overhead-reference` → `d603c01d2` | selectively integrated on `integrate/frametime-recovery` | probe core, both standalone assert-based test targets (MSVC-built, exit 0), bridge/run-loop hooks, and the opt-in `XRAY_OVERHEAD_PROBE` CMake option are in dev; the pinned probe adapter, `tools/_overhead_deps` snapshot, and Mac-only `overhead_approved_builds_v1.json` remain archived |
+| tag `archive/transfer/windows-2026-11-07` → `d336361d1` | selectively integrated on `integrate/frametime-recovery` | `docs/transfer/2026-11-07/` evidence pack and provenance WIP `8cf2af572` (external communication directory + both P2 review repairs) are in dev; the archived WINDOWS_HANDOFF restore block was superseded by the rewritten dev doc and not ported |
 
 All Metal changes are `USE_METAL`/`SM_METAL`-gated, so **GL and DX11 output is unchanged** on every branch.
 
