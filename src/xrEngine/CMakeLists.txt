@@ -1,4 +1,5 @@
 add_library(xrEngine)
+include("${CMAKE_SOURCE_DIR}/cmake/OverheadExperiment.cmake")
 
 option(XRAY_AGENT_HTTP "Build live xrSim HTTP provider transport when libcurl is available" ON)
 if(XRAY_AGENT_HTTP)
