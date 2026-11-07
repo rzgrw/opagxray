@@ -16,7 +16,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +40,12 @@ def parse_scenario_lines(lines: Iterable[str]) -> list[ScenarioStep]:
         if not line or line.startswith("#"):
             continue
         verb, sep, payload = line.partition(" ")
+        if verb == "wait_frames":
+            count = int(payload.strip())
+            if count <= 0:
+                raise ValueError(f"line {line_no}: wait_frames requires a positive frame count")
+            steps.append(ScenarioStep("wait_frames", (str(count),), line))
+            continue
         if verb == "sleep":
             if not sep or not payload.strip():
                 raise ValueError(f"line {line_no}: sleep requires seconds")
@@ -62,6 +68,29 @@ def parse_state_payload(payload: str) -> dict[str, str]:
         if sep:
             parsed[key] = value
     return parsed
+
+
+def wait_for_frames(read_state: Callable[[float], dict[str, str]], count: int,
+                    timeout: float) -> list[dict[str, str]]:
+    """Wait for count frame advances; each read gets the remaining time budget."""
+    deadline = time.monotonic() + timeout
+    target = None
+    observed = []
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"wait_frames timed out waiting for {count} frame advances")
+        state = read_state(remaining)
+        try:
+            frame = int(state["frame"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("wait_frames requires a numeric frame in bridge state") from exc
+        observed.append(state)
+        if target is None:
+            target = frame + count
+        elif frame >= target:
+            return observed
+        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
 
 
 def scan_log_text(text: str) -> list[str]:
@@ -341,6 +370,26 @@ def run_scenario(args: argparse.Namespace, steps: list[ScenarioStep]) -> dict[st
             if proc.poll() is not None:
                 record_event(step, "process_exited_before_step", returncode=proc.returncode)
                 break
+            if step.kind == "wait_frames":
+                def read_frame_state(budget: float) -> dict[str, str]:
+                    if proc.poll() is not None:
+                        raise RuntimeError("process exited during wait_frames")
+                    bridge.sock.settimeout(budget)
+                    ok, out = bridge.request("state")
+                    if not ok:
+                        raise RuntimeError(f"wait_frames state failed: {out}")
+                    state = parse_state_payload(out)
+                    states.append({"t": round(time.monotonic() - started, 3),
+                                   "raw": out, "state": state})
+                    return state
+
+                try:
+                    observations = wait_for_frames(read_frame_state, int(step.args[0]), remaining)
+                finally:
+                    bridge.sock.settimeout(args.timeout)
+                record_event(step, "done", first_frame=observations[0]["frame"],
+                             last_frame=observations[-1]["frame"])
+                continue
             verb, payload = step.args
             try:
                 ok, out = bridge.request(verb, payload)

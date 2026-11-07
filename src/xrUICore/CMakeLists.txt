@@ -1,5 +1,11 @@
 add_library(xrUICore)
 
+add_executable(xrUIShaderCacheTests EXCLUDE_FROM_ALL
+    tests/UIShaderCacheTests.cpp
+)
+target_include_directories(xrUIShaderCacheTests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(xrUIShaderCacheTests PRIVATE xrCore)
+
 target_sources(xrUICore PRIVATE
     pch.cpp
     pch.hpp

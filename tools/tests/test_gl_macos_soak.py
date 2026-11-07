@@ -360,5 +360,33 @@ class ScreenshotTests(unittest.TestCase):
             self.assertTrue((screenshot_dir / "keep.jpg").exists())
 
 
+class FrameWaitTests(unittest.TestCase):
+    def test_parser_accepts_positive_frame_count_and_rejects_invalid_counts(self):
+        self.assertEqual([ScenarioStep('wait_frames', ('2',), 'wait_frames 2')],
+                         parse_scenario_lines(['wait_frames 2']))
+        for line in ('wait_frames', 'wait_frames 0', 'wait_frames -1', 'wait_frames 1.5'):
+            with self.subTest(line=line), self.assertRaises(ValueError):
+                parse_scenario_lines([line])
+
+    def test_wait_requires_advancement_from_first_observed_frame(self):
+        from tools.gl_macos_soak import wait_for_frames
+        responses = iter([{'frame': '40'}, {'frame': '40'}, {'frame': '41'}, {'frame': '42'}])
+        with mock.patch('tools.gl_macos_soak.time.sleep'):
+            states = wait_for_frames(lambda _budget: next(responses), 2, timeout=1.0)
+        self.assertEqual(['40', '40', '41', '42'], [s['frame'] for s in states])
+
+    def test_wait_times_out_on_stalled_frames(self):
+        from tools.gl_macos_soak import wait_for_frames
+        with mock.patch('tools.gl_macos_soak.time.monotonic', side_effect=[0.0, 0.0, 0.1, 2.0]), \
+                mock.patch('tools.gl_macos_soak.time.sleep'):
+            with self.assertRaises(TimeoutError):
+                wait_for_frames(lambda _budget: {'frame': '40'}, 2, timeout=1.0)
+
+    def test_wait_rejects_state_without_numeric_frame(self):
+        from tools.gl_macos_soak import wait_for_frames
+        with self.assertRaises(ValueError):
+            wait_for_frames(lambda _budget: {'scene': 'menu'}, 2, timeout=1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,10 +27,9 @@ struct sh_pair
     shared_str shader_name;
     bool operator<(const sh_pair& other) const
     {
-        if (texture_name < other.texture_name)
-            return true;
-        else
-            return shader_name < other.shader_name;
+        if (texture_name != other.texture_name)
+            return texture_name < other.texture_name;
+        return shader_name < other.shader_name;
     }
 };
 
