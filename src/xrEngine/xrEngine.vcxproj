@@ -21,7 +21,7 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(xrExternals)imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(xrExternals)imgui;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>ENGINE_BUILD;INGAME_EDITOR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -106,6 +106,23 @@
     <ClInclude Include="xr_efflensflare.h" />
     <ClInclude Include="xr_input.h" />
     <ClInclude Include="xr_level_controller.h" />
+    <ClInclude Include="AgentBridge.h" />
+    <ClInclude Include="FrameTimeCollector.h" />
+    <ClInclude Include="FrameTimeSession.h" />
+    <ClInclude Include="FrameTimeClassification.h" />
+    <ClInclude Include="xrSim\xrSimZoneManifest.h" />
+    <ClInclude Include="xrSim\xrSimZoneState.h" />
+    <ClInclude Include="xrSim\xrSimActuator.h" />
+    <ClInclude Include="xrSim\xrSimActorIntent.h" />
+    <ClInclude Include="xrSim\xrSimActorProvider.h" />
+    <ClInclude Include="xrSim\xrSimActorRuntime.h" />
+    <ClInclude Include="xrSim\xrSimActors.h" />
+    <ClInclude Include="xrSim\xrSimAgentProvider.h" />
+    <ClInclude Include="xrSim\xrSimAnthropicTransport.h" />
+    <ClInclude Include="xrSim\xrSimBridge.h" />
+    <ClInclude Include="xrSim\xrSimNullAgent.h" />
+    <ClInclude Include="xrSim\xrSimPackSpawn.h" />
+    <ClInclude Include="xrSim\xrSimWorldState.h" />
     <ClInclude Include="XR_IOConsole.h" />
     <ClInclude Include="xr_ioc_cmd.h" />
     <ClInclude Include="xr_object.h" />
@@ -183,6 +200,54 @@
     <ClCompile Include="xrTheora_Surface.cpp" />
     <ClCompile Include="xr_collide_form.cpp" />
     <ClCompile Include="xr_efflensflare.cpp" />
+    <ClCompile Include="AgentBridge.cpp" />
+    <ClCompile Include="FrameTimeCollector.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>ENGINE_API=__declspec(dllexport);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="FrameTimeSession.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>ENGINE_API=__declspec(dllexport);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimZoneManifest.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimZoneState.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimActuator.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimActorIntent.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimActorProvider.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimActorRuntime.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimActors.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimAgentProvider.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimAnthropicTransport.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimBridge.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimNullAgent.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimPackSpawn.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimWorldState.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="xr_input.cpp" />
     <ClCompile Include="XR_IOConsole_script.cpp" />
     <ClCompile Include="xr_level_controller.cpp" />
