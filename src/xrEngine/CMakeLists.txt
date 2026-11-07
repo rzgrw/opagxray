@@ -73,6 +73,25 @@ target_include_directories(xrSimAuthoritySpineTests PRIVATE
 )
 target_link_libraries(xrSimAuthoritySpineTests PRIVATE xrSimCore)
 
+add_executable(xrFrameTimeCollectorTests EXCLUDE_FROM_ALL
+    FrameTimeCollector.cpp
+    tests/FrameTimeCollectorTests.cpp
+)
+target_include_directories(xrFrameTimeCollectorTests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
+add_executable(xrFrameTimeCollectorBoundaryTests EXCLUDE_FROM_ALL
+    FrameTimeCollector.cpp
+    tests/FrameTimeCollectorBoundaryTests.cpp
+)
+set_target_properties(xrFrameTimeCollectorBoundaryTests PROPERTIES UNITY_BUILD OFF)
+target_include_directories(xrFrameTimeCollectorBoundaryTests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
 target_sources_grouped(
     TARGET xrEngine
     NAME "editor"
