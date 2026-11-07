@@ -1,5 +1,7 @@
 # IX-Ray foundation adoption — milestone 1 implementation plan
 
+> **Status reconciliation (2026-11-07):** SHIPPED in `8984220b6`. The verification record below is historical: original ignored artifacts and execution worktree are now absent, and no current rerun is claimed. Direct empty-group execution and sustained vsync-on gameplay remain unverified. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > Execution is already authorized: assigned workers implement their own scope; the coordinator owns integration and independent review. Leave changes uncommitted.
 
 **Goal:** Stage a private, reproducible CoC runtime and correct the two confirmed target defects on `dev` baseline `a4d0fa256`.

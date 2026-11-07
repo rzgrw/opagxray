@@ -1,7 +1,7 @@
 # OpenGL macOS Stability Baseline - Design Spec
 
 **Date:** 2026-07-07
-**Status:** Draft approved in direction by rz; implementation plan next.
+**Status (2026-11-07):** Harness shipped; five-run GL and 20-minute idle acceptance remain open. Historical runtime defaults below are superseded by [macOS setup](../../macos-dev-setup.md); see [PLAN_STATUS](../../PLAN_STATUS.md) for evidence and refs.
 **Parent context:** `2026-07-05-engine-roadmap-v2.md` and `docs/HANDOVER.md`.
 
 ## 0. Purpose

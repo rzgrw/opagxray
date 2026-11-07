@@ -1,5 +1,7 @@
 # Agent Bridge Implementation Plan
 
+> **Status reconciliation (2026-11-07):** SHIPPED: `9162c534e`, `2a155131f`, `70e9183cf`. Historical Downloads paths are superseded by the private-runtime setup; unchecked boxes do not imply missing code. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A Unix-socket control channel (`-agent_bridge`) letting a coding agent drive the running game — console commands, Lua eval, synthetic input, state queries, screenshots — for autonomous verification.

@@ -1,21 +1,23 @@
 # OpenXVibeRay — Handover
 
-**Last updated:** 2026-07-14
+**Last updated:** 2026-11-07 (status reconciliation against `8984220b6`)
 **Written for:** a fresh coding agent (Codex) or engineer picking this repo up with zero prior context.
 
 ---
 
 ## 0. TL;DR — current direction
 
-Two things are true right now:
+Read [PLAN_STATUS.md](PLAN_STATUS.md) first for shipped refs, historical evidence, recovery order, and open acceptance. Runtime observations below were recorded in earlier sessions; this reconciliation did not rebuild or rerun them.
+
+Two things guide current work:
 
 1. **OpenGL is the working runtime.** The game boots, renders, and is fully playable on the GL backend (`renderer renderer_r3`). This is the baseline for everything below.
 2. **The active focus is the AI rehaul, developed on top of GL.** The renderer rewrite (native Metal / Vulkan) is **paused**. We are not blocked on graphics — GL is good enough to build the AI-driven Zone on top of. Metal M-R0 (menu) shipped; Metal M-R1 (in-game) is parked mid-flight with a clean resume guide (§4).
 
 So: **build GL, run GL, build the AI on GL.** Pick up Metal later from §4 if/when someone wants to resume the native-renderer track.
 
-Plan of record for the overall vision: [`docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md`](superpowers/specs/2026-07-05-engine-roadmap-v2.md).
-AI design spec (the active work): [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
+Historical roadmap for the overall vision (renderer-first sequencing superseded): [`docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md`](superpowers/specs/2026-07-05-engine-roadmap-v2.md).
+Original AI design (refined by the thin-harness and authority-spine specs linked in the inventory): [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
 
 ---
 
@@ -23,8 +25,9 @@ AI design spec (the active work): [`docs/superpowers/specs/2026-07-05-agentic-zo
 
 | Branch | State | Notes |
 |---|---|---|
-| `dev` | main line, GL working; **M-R0 merged** (PR #9) + this handover | base for the AI work |
-| `codex/ai-provider-http-transport` | **active AI continuation** | xrSim foundation through live Anthropic actor adapter, cancellable off-frame provider queue, and bridge-driven session pack wakes. |
+| `dev` | reconciled baseline `8984220b6`; M-R0, AI harness, and IXRay foundation shipped | base for selective AI recovery |
+| `origin/codex/ai-authority-spine-gate1` | unmerged recovery source at `1d951aa07` | partial Tasks 1–10; not ready to merge, no Gate 1 completion claim |
+| `ai-authority-manifest` | Task 1 recovery active separately | manifest/canonical state first; authority and reconciled codec/atomic commit follow |
 | `feat/metal-mr0-first-frame` | **merged to dev** via PR [#9](https://github.com/rzgrw/OpenXVibeRay/pull/9) | Metal renders the CoC main menu. GL/DX11 untouched. |
 | `feat/metal-mr1-ingame` | pushed WIP (`caa2e4953`), **not merged** | Metal deferred-pipeline foundation; in-game scene not yet rendering. Resume guide in §4. Branched off the pre-merge M-R0 tip — rebase onto current `dev` when resuming. |
 
@@ -46,6 +49,7 @@ cmake --build build -j10
 - On macOS Tahoe beta also pass `-DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk`.
 - `sysctl -n hw.ncpu` returns a trailing space on Tahoe — use a literal `-j10`.
 - **Build times:** a Metal-renderer rebuild is >2 min; give `cmake --build` a timeout ≥ 7 min. (The default 2-min shell timeout will kill it mid-link.)
+- **C++20** is configured in `cmake/XRay.Build.cmake`; C++17 plan snippets are a portable subset.
 - **GL is the default build.** `-DXRAY_METAL=ON` additionally builds/links the Metal module; leave it off for GL/AI work.
 
 Hard constraint — **`XRAY_EXCEPTIONS=0` on Darwin** (`src/CMakeLists.txt`): C++ exceptions cannot cross LuaJIT's ARM64 trampoline, so `THROW` compiles to `VERIFY` (a fatal abort). **All new code must return failures as values, never throw.** SPIRV-Cross/glslang exceptions are OK only because they're caught entirely below any Lua frame.
@@ -56,44 +60,33 @@ Hard constraint — **`XRAY_EXCEPTIONS=0` on Darwin** (`src/CMakeLists.txt`): C+
 
 The engine is self-testable over a Unix socket. This is how you (an agent) drive and observe the game.
 
-### 3.1 Game data location
-- Base install: `/Users/rz/stalkercoc` (full CoC, ~8 GB).
-- **Active run dir:** `/Users/rz/Downloads/S.T.A.L.K.E.R. - Call of Chernobyl` (an update package with symlinks into the base install; this is where the game actually runs from — `user.ltx`, saves, logs, screenshots, and the loaded shader copy all live under its `appdata/` and `gamedata/`).
+### 3.1 Private runtime and launch
 
-### 3.2 Launch
-```bash
-cd "/Users/rz/Downloads/S.T.A.L.K.E.R. - Call of Chernobyl"
-# menu only:
-/Users/rz/OpenXVibeRay/bin/arm64/Release/xr_3da -agent_bridge
-# load save "1" (l05_bar) straight in:
-/Users/rz/OpenXVibeRay/bin/arm64/Release/xr_3da -agent_bridge -start 'server(1/single/alife/load)' 'client(localhost)'
-```
-Run it **backgrounded / detached** (it's a long-lived GUI process). `nohup ... &` in a plain shell can get SIGHUP'd when the tool wrapper exits — prefer your harness's own background mechanism.
+Follow [macOS setup](macos-dev-setup.md) for the exact primary IXRay CoC 1.4.12
+base + 1.4.22 patch archive paths, target GL overlay, and explicit launch/bridge
+commands. Use separate private user and verification runtimes/appdata. The old
+Downloads run directory and save `1` are historical, not valid defaults; do not
+copy donor saves/configs. Begin fresh tests with a new game and a unique private
+save. Keep the game process alive through the terminal/task runner.
 
-### 3.3 Drive it
-```bash
-SOCK="appdata/agent_bridge.sock"
-python3 /Users/rz/OpenXVibeRay/tools/agentctl.py "$SOCK" state          # scene/fps/level/pos/paused
-python3 /Users/rz/OpenXVibeRay/tools/agentctl.py "$SOCK" shot myshot    # -> appdata/screenshots/myshot.jpg (readable by the agent)
-python3 /Users/rz/OpenXVibeRay/tools/agentctl.py "$SOCK" key SPACE tap  # dismiss the "press any key" load screen
-python3 /Users/rz/OpenXVibeRay/tools/agentctl.py "$SOCK" cmd 'main_menu off'
-python3 /Users/rz/OpenXVibeRay/tools/agentctl.py "$SOCK" cmd 'flush'    # force the log to disk
-```
-Verbs: `hello/cmd/lua/key/mouse/state/shot/bye`. The soak regression gate: `tools/agentctl.py <sock> --script tools/bridge_soak.txt`.
-Log: `appdata/logs/openxray_radik zagirov.log` (truncate before a run to isolate output).
+### 3.2 Verification status
 
-### 3.5 GL stability gate
+Foundation `8984220b6` records 41 Python tests, two C++ targets, a corrected menu
+capture, and a fresh Cordon movement/inventory/save/reload/quit gate (vsync off).
+The original ignored artifacts and execution worktree are now absent: this is
+historical evidence, not a current rerun. Full five-run GL/20-minute idle,
+direct empty-group execution, sustained vsync-on gameplay, current private pack
+verification, and hardened live non-coast acceptance remain open.
 
-Before AI work, keep `renderer_r3` green with the GL macOS soak wrapper:
+### 3.3 Bridge and GL gate
 
-```bash
-python3 /Users/rz/OpenXVibeRay/tools/gl_macos_soak.py \
-  --scenario /Users/rz/OpenXVibeRay/tools/gl_load_play_save_load.txt \
-  --repeat 5 \
-  --artifacts /Users/rz/OpenXVibeRay/artifacts/gl_macos_soak/repeat_5
-```
-
-This launches the game from the CoC run directory, drives the bridge, samples FPS/frame progress and RSS, validates screenshots/logs/exit, and writes `summary.json` plus `report.txt`.
+Use `tools/agentctl.py <private-socket> <verb>` and pass `--game-dir`, `--binary`,
+`--socket`, and `--artifacts` explicitly to `tools/gl_macos_soak.py`, as shown in
+[macOS setup](macos-dev-setup.md#gl-macos-stability-gate). Verbs include
+`hello/cmd/lua/key/mouse/state/shot/bye`. The old load/play scripts and AI smoke
+examples below must be adapted to the private runtime and its actual save;
+do not execute their historical implicit defaults. Frame freshness alone does
+not establish image correctness: inspect world, inventory, and menu captures.
 
 ### 3.4 Two gotchas that will waste your time
 - **Do NOT use `-nosound`.** It crashes CoC's `sound_theme.script` (`nil played_id`). To silence audio, set in `appdata/user.ltx` (while the game is stopped): `snd_volume_eff 0.` and `snd_volume_music 0.` — keeps the sound subsystem alive so scripts work.
@@ -132,12 +125,12 @@ The running game loads GLSL from a **copy** at `<CoC gamedata>/shaders/gl/`, **n
 
 ## 5. The active work — AI implementation on GL
 
-The next phase is the **agentic Zone** (`xrMind` / `xrSim`). Read the spec first: [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
+The active continuation is selective **Gate 1 authority-spine recovery**, after the shipped xrSim/actor foundation. Read [PLAN_STATUS.md](PLAN_STATUS.md#gate-1-recovery-and-remaining-gates) for order and unresolved Task 3 contracts. Original agentic-Zone design: [`docs/superpowers/specs/2026-07-05-agentic-zone-design.md`](superpowers/specs/2026-07-05-agentic-zone-design.md).
 
 Shape of it (per the spec and the design decisions in project memory):
 - The Zone is **simulated by LLM agents** (persistent `WorldAgents`) that own world evolution. This is a **complete simulation rewrite**, not a sidecar: legacy ALife becomes the compatibility/materialization surface while `xrMind` + `xrSim` take over world authority.
 - **Cloud-first, thin offline.** Move the bulk of compute to LLMs (Anthropic/OpenAI) — the local machine's resources are reserved for the renderer/engine, not a load-bearing local model.
-- Future provider-backed in-game AI tests should default to the **Sonnet-tier model** (currently documented as `claude-sonnet-5`) before any Opus-quality pass. Keep deterministic-null/replay tests as the CI floor; use Sonnet to measure realistic in-game behavior, cost, RPM pressure, and crash safety.
+- The authority-spine contract remains **Sonnet-only**. `claude-sonnet-5` is a historical plan/source value requiring an official availability check before live use; no model/provider substitution is authorized here. Keep deterministic-null/replay tests as the CI floor.
 - Honest trade-offs the spec commits to: weaker determinism (replay via recorded tool-calls), effectively online, ~\$3–8/wall-hr.
 - Invariants that carry over from the engine work: **stable IDs never regenerated**, **two-phase validation / no-THROW** (see §2), materialization contract.
 
@@ -145,7 +138,7 @@ Because GL already runs the full game, the AI work does **not** need the rendere
 
 ### 5.1 xrSim foundation checkpoint
 
-The first AI substrate began on `codex/ai-zone-foundation`; the current continuation is `codex/ai-provider-http-transport`. `src/xrEngine/xrSim/` contains a deterministic coarse `WorldState`, stable index+generation handles, clamped `adjust_population`, an append-only tool log, actor intent validation, and the provider handoff. The C++ substrate remains replayable even though live model output is not deterministic.
+The first AI substrate began on `codex/ai-zone-foundation`; the provider/actor continuation is now included in the reconciled `dev` baseline. `src/xrEngine/xrSim/` contains a deterministic coarse `WorldState`, stable index+generation handles, clamped `adjust_population`, an append-only tool log, actor intent validation, and the provider handoff. The C++ substrate remains replayable even though live model output is not deterministic.
 
 Debug bridge verbs are available in `-agent_bridge` sessions:
 
@@ -181,7 +174,7 @@ Thin-harness actor checkpoint:
 - Smoke: `python3 tools/gl_macos_soak.py --scenario tools/ai_thin_harness_smoke.txt --artifacts artifacts/ai_thin_harness_smoke`
 
 Provider and asynchronous actor checkpoint:
-- Default live provider config is `provider=anthropic`, `model=claude-sonnet-5`, `timeout_ms=30000`.
+- Source defaults at `8984220b6` are `provider=anthropic`, `model=claude-sonnet-5`, `timeout_ms=30000`; this does not verify current model availability.
 - Env overrides: `XRAY_AGENT_PROVIDER`, `XRAY_AGENT_MODEL`, `XRAY_AGENT_API_KEY` or `ANTHROPIC_API_KEY`, `XRAY_AGENT_TIMEOUT_MS`.
 - Missing key is a normal **coast** value (`reason=missing_api_key`), not an error/throw. With a key present, the live provider shell now has an optional curl-backed HTTP transport when `XRAY_AGENT_HTTP=ON` and CMake finds `CURL::libcurl`; otherwise it still coasts with `network_adapter_not_linked`.
 - `agent.provider live` reports the effective shell state and `transport=<curl|unavailable>` through the bridge; deterministic null remains the default runtime provider.
@@ -218,6 +211,7 @@ Current boundary / next AI milestone:
 - `src/xrGame/` — game logic, ALife, Lua bindings (the surface the AI rehaul will reshape).
 
 ## 7. Where the detailed context lives
+- Current inventory and recovery gates: [PLAN_STATUS.md](PLAN_STATUS.md)
 - Roadmap / vision: `docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md`
 - AI design: `docs/superpowers/specs/2026-07-05-agentic-zone-design.md`
 - macOS setup: `docs/macos-dev-setup.md`

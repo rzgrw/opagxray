@@ -1,5 +1,7 @@
 # SP1: macOS Baseline — Implementation Plan
 
+> **Status reconciliation (2026-11-07):** SHIPPED: `sp1-macos-baseline` tag `13f151f04` (commit `585dda21f`). Historical checkboxes are preserved. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Verify that Viberay builds and runs end-to-end on macOS Apple Silicon with the OpenGL renderer, producing a playable game session.

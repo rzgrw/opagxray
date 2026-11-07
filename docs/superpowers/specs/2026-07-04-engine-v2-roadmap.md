@@ -1,6 +1,6 @@
 # OpenXVibeRay — Version Roadmap (V1 → V5)
 
-> **⚠️ SUPERSEDED BY `2026-07-05-engine-roadmap-v2.md` (2026-07-05).** After a day of rapid pivots this document accumulated internal contradictions (Metal-era North Star/milestones/risks alongside the Vulkan and agentic-Zone revisions). It is retained as a historical index of the decisions; **the v2 document is the single plan of record** and the child specs (vulkan-renderer-roadmap, agentic-zone-design) are authoritative for their domains. Do not plan work from this file.
+> **SUPERSEDED (status reconciled 2026-11-07).** Retained as a historical research index. [Roadmap v2](2026-07-05-engine-roadmap-v2.md) retains the long-term vision; [PLAN_STATUS](../../PLAN_STATUS.md) owns current execution status: AI on GL, native renderers paused. Do not plan work from this historical file.
 
 **Date:** 2026-07-04 (rev. 2026-07-05 — restructured around rz's version vision + cutting-edge research)
 **Status:** Approved direction (rz)

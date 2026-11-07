@@ -1,10 +1,10 @@
-# OpenXVibeRay — Engine Roadmap v2 (Plan of Record)
+# OpenXVibeRay — Engine Roadmap v2 (Long-Term Vision)
 
 **Date:** 2026-07-05 (rev. 2: dual-native renderer decision, same day)
-**Status:** THE plan of record. Supersedes `2026-07-04-engine-v2-roadmap.md` (now an index with a banner). Produced by a 4-reviewer implementation/consistency audit after the day's pivots; all P0/P1 findings are resolved in this document or in the accompanying commits.
+**Status (2026-11-07):** Long-term dual-native/agentic-Zone vision retained; the renderer-first execution order below is superseded by **AI on GL**. [PLAN_STATUS.md](../../PLAN_STATUS.md) owns current implementation status and acceptance; [HANDOVER.md](../../HANDOVER.md) gives runtime context. Historical detailed milestones remain for reference, not automatic execution.
 **Child specs (authoritative for their domain):**
 - Renderer (PC + dev vehicle): `2026-07-05-vulkan-renderer-roadmap.md` (scope narrowed: Linux/Windows backend, developed on Mac via MoltenVK)
-- Renderer (Mac): `docs/superpowers/plans/2026-03-29-sp2-metal-renderer.md` Tasks 22–24 + the Metal R1–R3 research ladder (REVIVED)
+- Renderer (Mac): `docs/superpowers/plans/2026-03-29-sp2-metal-renderer.md` historical Tasks 22–24 + Metal research; M-R0/menu shipped, M-R1 parked
 - AI: `2026-07-05-agentic-zone-design.md` (xrMind agentic Zone; body wins over its appendix)
 - Surviving substrate: `2026-07-05-zone-simulation-design.md` (ids/validation/materialization invariants only)
 - Parked: seamless streaming (xrStream)
@@ -14,22 +14,27 @@
 
 A platform-agnostic rebuild of the X-Ray engine with **DUAL-NATIVE renderers** (rz 2026-07-05, supersedes Vulkan-everywhere): **native Metal on macOS** (revived — TBDR, MetalFX, Metal RT) and **native Vulkan on Linux/Windows** (VK RT), sharing the engine's existing multi-backend architecture, one GLSL shader source (glslang→SPIR-V→{Vulkan directly | SPIRV-Cross→MSL}), and D3D-style conventions in shared code (`USE_METAL || USE_VULKAN` branches). **MoltenVK is demoted to a dev vehicle** — it lets the Vulkan backend be developed/debugged on the Mac before PC hardware/CI exists; it ships nowhere. Native RT on every platform; no translation-layer compromise on the primary one. Plus a **Zone simulated by LLM agents** (cloud-only, thin offline) and an engine that **drives and verifies itself** (agent bridge, shipped). The original engine is inspiration and foundation, not scripture — and its multi-renderer design is exactly why dual-native is cheap here.
 
-## Current truth (verified 2026-07-05)
+## Current status (reconciled 2026-11-07)
 
 | Piece | State |
 |---|---|
-| GL renderer | **Working, default.** Heavily stabilized (exit hangs, signal safety, resolution, occlusion pause, error surfacing). The baseline to beat. |
-| Agent bridge | **Shipped.** `-agent_bridge` + `tools/agentctl.py`; soak = regression gate; `shot <name>` now honored by GL. |
-| Metal backend | **REVIVED — the Mac renderer.** Tasks 1–21 done (compiles+links); Tasks 22–24 (first frame → CoC parity) are the **next code milestone**. `XRAY_METAL` flips default-ON at first-frame exit. |
-| Vulkan renderer | **Not started — the Linux/Windows renderer.** `XRAY_VULKAN` reserved; developed Mac-first via MoltenVK as a dev vehicle; zero deps vendored yet. |
-| Shader toolchain | glslang (GLSL→SPIR-V, Vulkan-native) + SPIRV-Cross (→MSL, Metal-only) vendored; now gated on renderer options — default builds don't pay for them. |
-| AI (agentic Zone) | Fully specced; implementation not started. |
+| OpenGL / foundation | Working runtime; `8984220b6` ships empty-group guards, UI comparator, private CoC staging, and frame-wait/menu sequencing. Historical gate evidence is recorded, not rerun; original ignored artifacts/worktree are absent. |
+| Agent bridge | Shipped; verification uses explicit private runtime paths from [macOS setup](../../macos-dev-setup.md). |
+| Metal | M-R0/menu shipped; M-R1 parked at unmerged `caa2e4953`. Native-renderer work paused. |
+| Vulkan | Not started; long-term Linux/Windows renderer, MoltenVK only a development vehicle. |
+| AI on GL | Current priority. Foundation, HTTP, thin actor harness, packs, and async actor wakes shipped; Gate 1 Task 1 recovery active separately, Gate 1 incomplete. |
 
-## Version ladder (unchanged)
+The unmerged Gate 1 source at `1d951aa07` requires selective recovery and contract
+reconciliation, not a wholesale merge. The `f1222d148` Gemini/model/version-ladder
+reanimation is **proposed, not approved**. `claude-sonnet-5` remains a historical
+plan value requiring official availability verification before live use.
+See the inventory for exact refs, recovery order, and remaining acceptance.
+
+## Historical version ladder (not current execution order)
 
 **V1** = dual-native renderers (Metal on Mac + Vulkan on PC) + agentic Zone AI + bridge · **V2** = polish/sharpen, retire GL + compat scaffolding · **V3** = AI maturation at scale · **V4** = reserved expansion · **V5** = Rust rewrite (long horizon).
 
-## V1 milestones (the ladder that replaces all earlier versions)
+## Historical V1 milestones (renderer-first ordering superseded)
 
 **A0 — Agentic vertical slice on GL (parallel track, PROPOSED — rz to confirm).**
 The AI epic's riskiest unknowns (real $/wall-hour, RPM/429 behavior, LLM ecology coherence, replay-gate integrity) are renderer-agnostic and testable **today** on the working GL game via the bridge. A0 = `xrWorldState` store + `ToolDispatcher` + 1 ZONE + 1 ECOLOGY agent + record/replay + a `zonesoak` script. *Exit:* measured $/hr and req/min published; byte-identical replay green. Runs parallel to V-R0/V-R1 (zero shared code surface). If rz prefers strict renderer-first serialization, delete this milestone explicitly — that is a resourcing decision, not a default.
@@ -77,6 +82,6 @@ PC: full `VK_KHR` RT on NVIDIA/RADV/ANV. Mac: Metal RT (`MTLAccelerationStructur
 
 Stale "SP2 Task N" comments across shared `r2_*`/`r3_*` files (reword to "parked Metal backend"); dead `USE_METAL` arms in shared `dxImGuiRender.cpp` (Metal uses a file replacement); `MTL::` casts leaking into shared `r2_rendertarget.cpp` (pattern hygiene before `vk*` equivalents copy it); appendix/body drift in older specs (bannered).
 
-## Top risks
+## Historical top risks (2026-07-05; current status above takes precedence)
 
 1. **MoltenVK is the primary path but a translation layer** — no RT, no tile-memory; mitigations: parked Metal insurance + keep-alive + standing status reviews. 2. **Perf promise unmeasured until the benchmark suite exists** — build it at V-R0/V-R1, not later. 3. **AI economics unknown** — A0 exists to measure before the big build. 4. **Single-developer fleet: three OSes** — Mac-first sequencing + V-RX as its own phase. 5. **Doc drift after rapid pivots** — this document is the single plan of record; children own detail; amendments update this file first.

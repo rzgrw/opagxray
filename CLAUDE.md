@@ -2,16 +2,16 @@
 
 ## Project Overview
 
-OpenXVibeRay is a fork of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The original engine is **inspiration and foundation, not scripture**. Current direction (plan of record: `docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md`):
+OpenXVibeRay is a fork of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The original engine is **inspiration and foundation, not scripture**. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision.
 
-- **Renderer:** **DUAL-NATIVE** — native **Metal on macOS** (revived; bring-up Tasks 22–24 = next code milestone) + native **Vulkan on Linux/Windows** (developed on Mac via MoltenVK as a dev vehicle). Plan: `docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md`. GL is the working fallback until both reach parity.
-- **AI:** the Zone is simulated by **LLM agents** (xrMind WorldAgents; thin C++ xrSim state store + near-player executor) — spec: `docs/superpowers/specs/2026-07-05-agentic-zone-design.md`. AI comes **after** the renderer.
+- **Runtime:** OpenGL is the working baseline and **AI on GL is the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953`, Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
+- **AI:** xrSim foundation, HTTP transport, thin actor harness, session packs, and async actor wakes are shipped. Gate 1 authority-spine Task 1 recovery is active separately; Gate 1 is not complete. See the inventory before restarting old plans.
 - **Agent bridge (shipped):** launch with `-agent_bridge`, drive via `tools/agentctl.py` — Claude can run, control, and screenshot the game itself. This is the standard verification harness.
 
 ## Architecture
 
-- **Engine core:** C++17, CMake 3.23+, SDL2 for windowing/input, OpenAL for audio
-- **Renderers:** OpenGL (working, the current runtime), Metal (Mac renderer, bring-up active, `XRAY_METAL=OFF` until first-frame gate), Vulkan (PC renderer, not yet created), DX11 (Windows legacy, no investment)
+- **Engine core:** C++20 (`cmake/XRay.Build.cmake`; old C++17 plan code is a portable subset), CMake 3.23+, SDL2 for windowing/input, OpenAL for audio
+- **Renderers:** OpenGL (working, the current runtime), Metal (M-R0/menu shipped; M-R1 parked, `XRAY_METAL=OFF`), Vulkan (PC renderer, not yet created), DX11 (Windows legacy, no investment)
 - **Scripting:** LuaJIT + luabind for game logic (to be reduced by the AI rehaul)
 - **Platform layer:** `src/Common/Platform.hpp` → `PlatformApple.inl` / `PlatformLinux.inl` / `PlatformWindows.inl`
 
@@ -20,8 +20,8 @@ OpenXVibeRay is a fork of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebui
 ```
 src/Layers/xrRenderPC_GL/    # OpenGL renderer (working baseline)
 src/Layers/xrRenderGL/       # GL hardware abstraction
-src/Layers/xrRenderMetal/    # Metal HAL — the Mac renderer (bring-up active)
-src/Layers/xrRenderPC_Metal/ # Metal module (EXCLUDE_FROM_ALL until first frame)
+src/Layers/xrRenderMetal/    # Metal HAL — M-R0 shipped, M-R1 parked
+src/Layers/xrRenderPC_Metal/ # Metal module (EXCLUDE_FROM_ALL; opt-in)
 src/Layers/xrRender/         # Shared render code (USE_DX11/USE_OGL/USE_METAL branches)
 src/Layers/xrRender_R2/      # Shared render logic (CRender, phases)
 src/xrEngine/                # Core engine, SDL2, input, console, AgentBridge
@@ -44,7 +44,7 @@ Binaries go to `bin/arm64/Release/` (not `build/bin/`).
 
 On macOS Tahoe beta, also pass: `-DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk`
 
-`-DXRAY_METAL=ON` builds/links the Metal module (the Mac renderer under bring-up; off by default until its first-frame gate).
+`-DXRAY_METAL=ON` builds/links the parked Metal module; leave it off for GL/AI work.
 
 ## Critical macOS Constraints
 
@@ -54,13 +54,13 @@ On macOS Tahoe beta, also pass: `-DCMAKE_OSX_SYSROOT=/Library/Developer/CommandL
 
 ## Testing — use the agent bridge
 
-The engine is self-testable. Launch with `-agent_bridge`, then:
+Use the exact primary IXRay CoC 1.4.12 + 1.4.22 archives and target GL overlay, with separate private user/test appdata and explicit paths from [macOS setup](docs/macos-dev-setup.md). Do not use the historical Downloads runtime default or assume save `1`. Launch with `-agent_bridge`, then:
 
 ```bash
-python3 tools/agentctl.py <gamedir>/appdata/agent_bridge.sock --script tools/bridge_soak.txt
+python3 tools/agentctl.py <private-runtime>/appdata/agent_bridge.sock state
 ```
 
-Verbs: `hello/cmd/lua/key/mouse/state/shot/bye`. The soak (movement, save/load, UI, quit) is the regression gate before merging engine changes. Screenshots land in `appdata/screenshots/` and are readable by Claude. Run setup details: `docs/macos-dev-setup.md` and the CoC notes in project memory.
+Verbs: `hello/cmd/lua/key/mouse/state/shot/bye`. A private-save scenario covering movement, save/load, UI, and quit is the regression gate before merging engine changes; adapt historical scripts that assume save `1`. Screenshots land in `appdata/screenshots/` and are readable by Claude. Run setup details: `docs/macos-dev-setup.md` and the CoC notes in project memory.
 
 ## Coding Conventions
 
@@ -73,19 +73,16 @@ Verbs: `hello/cmd/lua/key/mouse/state/shot/bye`. The soak (movement, save/load, 
 
 ## Documentation
 
-- `docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md` — **THE plan of record (V1–V5), read first**
-- `docs/superpowers/specs/2026-07-05-vulkan-renderer-roadmap.md` — current renderer plan (V-R0…V-R3)
-- `docs/superpowers/specs/2026-07-05-agentic-zone-design.md` — current AI plan (xrMind/xrSim)
-- Parked/superseded (banners inside say so): old 07-04 roadmap, zone-simulation (deterministic parts), seamless streaming, `CONTINUATION.md`. The SP2 Metal plan is **REVIVED** (Tasks 22–24 active).
-- `docs/macos-dev-setup.md` — build/run + agent bridge usage
+- [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md) — current inventory, shipped refs, recovery order, and outstanding acceptance; read first.
+- [docs/HANDOVER.md](docs/HANDOVER.md) — runtime/AI context and parked Metal resume guide.
+- [Engine roadmap v2](docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md) — long-term vision; renderer-first execution order is superseded.
+- [Authority spine](docs/superpowers/specs/2026-07-14-full-zone-ai-authority-spine-design.md) and [thin harness](docs/superpowers/specs/2026-07-07-llm-thin-harness-ai-design.md) refine the original agentic-Zone design.
+- [macOS setup](docs/macos-dev-setup.md) — private runtime staging and explicit build/run/test paths.
 
-## Current State (2026-07-06)
+## Current State (2026-11-07)
 
-> **Start here: [`docs/HANDOVER.md`](docs/HANDOVER.md)** — full handover (renderer status, build/run/test, Metal resume guide, AI phase).
-
-- **Direction (2026-07-06):** **OpenGL is the working runtime; the active focus is the AI rehaul built on top of GL.** The native-renderer rewrite is paused.
-- **Engine stabilization:** complete — exit hangs, signal safety, resolution handling, GL error surfacing all fixed; bridge soak green.
-- **Agent bridge:** shipped and proven (the AI-work verification harness).
-- **Metal backend (Mac renderer):** M-R0 done (menu renders — PR #9); M-R1 (in-game) parked mid-flight on `feat/metal-mr1-ingame` — resume guide in the handover.
-- **Vulkan renderer (PC):** not started.
-- **AI (agentic Zone):** the next focus — spec `docs/superpowers/specs/2026-07-05-agentic-zone-design.md`, developed on the GL runtime.
+- **Baseline:** `dev` at `8984220b6` includes the IXRay foundation guards, UI comparator, private stager, and frame-wait harness.
+- **Evidence:** 41 Python tests, two C++ targets, and the vsync-off Cordon gate are historical records; the original ignored artifacts/worktree are absent. They are not current reruns.
+- **Recovery:** unmerged Gate 1 branch `1d951aa07` is partial recovery material; Task 1 is active in `ai-authority-manifest`, followed by authority and reconciled strict codec/atomic commit work.
+- **Open acceptance:** hardened live non-coast prompt, current private packs, five-run GL/20-minute idle, direct empty-group path, and sustained vsync-on gameplay; Gate 1 has further replay/soak/live gates.
+- **Provider policy:** `claude-sonnet-5` is a historical value requiring official availability verification before live use; this reconciliation approves no provider/model substitution.

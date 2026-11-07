@@ -1,5 +1,7 @@
 # AI Provider HTTP Transport Implementation Plan
 
+> **Status reconciliation (2026-11-07):** SHIPPED: `47e4badb1`; actor wakes gained async execution later. `claude-sonnet-5` is a historical value requiring official verification before live use; no substitution is approved here. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the existing Anthropic provider shell capable of owning a real HTTP transport while keeping deterministic-null and coast behavior as the CI floor.

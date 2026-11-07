@@ -1,6 +1,6 @@
 # SP2: Metal Renderer Implementation Plan
 
-> **✅ REVIVED (2026-07-05, dual-native decision).** After a brief parking during the Vulkan-everywhere exploration, rz adopted **dual-native renderers**: this Metal backend IS the Mac renderer (Vulkan serves Linux/Windows). Tasks 1–21 are done (compiles+links). **Tasks 22–24 (first frame → CoC parity) are the active next code milestone** — entry point: the blender `VERIFY` at device create. After parity, the Metal R1–R3 ladder (TBDR/MetalFX/Metal RT) from `../specs/2026-07-04-engine-v2-roadmap.md`'s research applies. Plan of record: `../specs/2026-07-05-engine-roadmap-v2.md`.
+> **PARKED (2026-11-07).** M-R0/menu shipped; M-R1 is unmerged at `caa2e4953`. AI on GL is current, so Tasks 22–24 are not the active next milestone. Historical instructions below remain for renderer recovery; see [PLAN_STATUS](../../PLAN_STATUS.md) and the [Metal resume guide](../../HANDOVER.md).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

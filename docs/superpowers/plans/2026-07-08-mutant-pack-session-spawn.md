@@ -1,5 +1,7 @@
 # Mutant Pack Session Spawn Implementation Plan
 
+> **Status reconciliation (2026-11-07):** SPAWN SEAM SHIPPED: `a374e6bc9`, `558f73348`, `0e494f6a9` plus fixes. Current private-runtime pack verification and full AI ownership remain open. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Spawn a mutant pack during a live game session, register it as an xrSim `MutantPackAgent`, and wake it through the thin LLM harness.

@@ -1,5 +1,7 @@
 # AI Zone Foundation Implementation Plan
 
+> **Status reconciliation (2026-11-07):** SHIPPED: `c8d671514`, `27b7dc9a2`, `b002d9d7a`; unchecked boxes do not imply missing code. Model strings are historical, not verified current availability. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the first deterministic xrSim substrate for the agentic Zone on top of the stabilized GL runtime.

@@ -1,5 +1,7 @@
 # The Agentic Zone (xrMind + xrSim) — Design Spec
 
+> **Status reconciliation (2026-11-07):** AI ON GL is current. The thin-harness and authority-spine designs refine this historical model (including near-player authorship). Model/pricing claims below, especially `claude-sonnet-5`, require official verification before live use; this reconciliation performs none and approves no substitution. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 **Date:** 2026-07-05
 **Status:** Design approved in direction (rz) — implementation spec for V1 Epic A. **Supersedes the LLM/authority model of `2026-07-05-zone-simulation-design.md`** (that spec's deterministic ecology/economy sim is demoted per rz's pivot; its band/materialization/testability groundwork carries forward).
 **Parent:** `2026-07-04-engine-v2-roadmap.md` (V1 Epic A — "the Zone is simulated by the LLM")

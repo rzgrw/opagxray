@@ -1,5 +1,7 @@
 # Async Live Actor Provider Implementation Plan
 
+> **Status reconciliation (2026-11-07):** SHIPPED: `9cf56d00c`, `e19a9a47d`, `f66aafd34`, hardened by `96142b7c0`. Hardened-prompt live non-coast acceptance remains open; historical model values require official availability verification. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let debug actors and session mutant packs request real Anthropic-authored actor intents without ever blocking the engine frame.

@@ -1,5 +1,7 @@
 # GL macOS Stability Baseline Implementation Plan
 
+> **Status reconciliation (2026-11-07):** HARNESS SHIPPED: `7a9b032cc`…`76209178d` plus fixes. Five-run GL and 20-minute idle acceptance remain open; use explicit private paths and a fresh named save, not Downloads/save `1`. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a repeatable OpenGL macOS soak/benchmark harness that proves `renderer_r3` is stable, measurable, and ready to host the AI overhaul on rz's 24 GB Apple Silicon Mac.

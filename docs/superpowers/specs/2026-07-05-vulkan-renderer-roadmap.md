@@ -1,6 +1,6 @@
 # Vulkan-Everywhere Renderer Roadmap (Epic V-R) — Design Spec
 
-> **⚠️ SCOPE NARROWED (2026-07-05, dual-native decision).** rz adopted **dual-native renderers**: **Mac ships native Metal** (revived — see the SP2 plan and roadmap-v2); this Vulkan backend is the **Linux/Windows renderer**, developed Mac-first with **MoltenVK as a dev vehicle only** (nothing ships through it). The MoltenVK viability analysis below remains valid for the dev-vehicle role; 'primary Mac renderer' statements are superseded. Plan of record: `2026-07-05-engine-roadmap-v2.md`.
+> **PARKED / NOT STARTED (2026-11-07).** Long-term scope is native Vulkan on Linux/Windows and native Metal on Mac; MoltenVK is a development vehicle only. AI on GL is current. Vulkan-everywhere and primary-Mac claims below are historical and superseded; see [PLAN_STATUS](../../PLAN_STATUS.md).
 
 **Date:** 2026-07-05
 **Status:** Design approved in direction (rz) — **supersedes the R workstream** ("native Metal TBDR → GPU-driven → RT") in `2026-07-04-engine-v2-roadmap.md`. Reverses that roadmap's Guiding Rule #1 ("native over portable").

@@ -1,5 +1,7 @@
 # LLM Thin-Harness AI Implementation Plan
 
+> **Status reconciliation (2026-11-07):** SHIPPED: `b38c943fb`…`589be8ff9` plus fixes. Command-ledger output is not completed live-object authority; historical checkboxes are preserved. See [PLAN_STATUS](../../PLAN_STATUS.md) for evidence, gates, and current execution order.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the first replayable xrMind thin-harness slice: debug `SquadAgent` and `MutantPackAgent` actors that receive observations, parse LLM-authored `xrsim_actor_intent_v1` packets, validate them, and emit deterministic actuator command streams.
