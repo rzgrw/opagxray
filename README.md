@@ -1,12 +1,23 @@
-# OpenXVibeRay
+# Open Agentic XRay
 
-OpenXVibeRay is a fork of [OpenXRay](https://github.com/OpenXRay/xray-16) that treats the original X-Ray Engine as foundation, not scripture. The goal is to turn S.T.A.L.K.E.R.'s engine into a modern, self-testable, agent-driven runtime: stable on macOS today, moving toward native Metal/Vulkan rendering, and replacing old game AI with LLM-authored world simulation.
+Open Agentic XRay is a detached fork of [OpenXRay](https://github.com/OpenXRay/xray-16) that treats the original X-Ray Engine as foundation, not scripture. The goal is a modern, self-testable, agent-driven S.T.A.L.K.E.R. runtime: stable and consistent frame times first, then native Metal/Vulkan rendering and LLM-authored world simulation.
+
+The name says what it is: the open X-Ray engine, made agentic. Agents build and test it, and agents will run its Zone. The repository short name `opagxray` stands for **Op**en **Ag**entic **XRay**. The project was formerly called OpenXVibeRay.
 
 This is an engine project. It does not include S.T.A.L.K.E.R. game data, assets, or proprietary content.
 
-## Current Status
+## Repository and Branches
 
-Last updated: 2026-07-08.
+- Home: [github.com/rzgrw/opagxray](https://github.com/rzgrw/opagxray). It is not in OpenXRay's GitHub fork network.
+- Upstream relationship: OpenXRay and IXRay are inspiration and selective donors. There is no PR flow upstream; individual fixes are taken in after review, with attribution and license notices preserved.
+- `main` (this branch) is stable. It moves only by fast-forward from `dev` after a recorded verification gate.
+- [`dev`](https://github.com/rzgrw/opagxray/tree/dev) is experimental integration and where active work happens, currently on **Windows 11** (MSBuild x64 build, OpenGL runtime, Windows agent bridge with background instances).
+
+**About this README.** On `main` it describes the project and the code in this branch. The [`dev` README](https://github.com/rzgrw/opagxray/blob/dev/README.md) carries the live development status, build instructions for the newest platforms, and known issues. When `dev` passes a gate and `main` fast-forwards, the `dev` README comes with it and becomes the `main` README.
+
+## Status of This Branch
+
+Snapshot as of the last gate (status text last updated 2026-07-08). For current progress see the [`dev` README](https://github.com/rzgrw/opagxray/blob/dev/README.md) and [docs/PLAN_STATUS.md on dev](https://github.com/rzgrw/opagxray/blob/dev/docs/PLAN_STATUS.md).
 
 The working runtime is **OpenGL on macOS**, driven through the shipped **agent bridge**. Renderer replacement is paused while the AI rehaul lands on top of the stable GL baseline.
 
@@ -41,7 +52,7 @@ What is not done yet:
 
 ## Direction
 
-OpenXVibeRay is moving in two big arcs.
+Open Agentic XRay is moving in two big arcs.
 
 ### 1. Agentic Zone
 
@@ -94,8 +105,8 @@ brew install cmake ccache sdl2 lzo libogg libvorbis theora openal-soft jpeg-turb
 Clone and initialize submodules:
 
 ```bash
-git clone https://github.com/rzgrw/OpenXVibeRay.git
-cd OpenXVibeRay
+git clone https://github.com/rzgrw/opagxray.git
+cd opagxray
 git submodule update --init --recursive
 ```
 
@@ -137,7 +148,7 @@ You need original game files or a legal standalone mod install. The engine runs 
 Copy GL shaders into the game data once:
 
 ```bash
-cp -r /path/to/OpenXVibeRay/res/gamedata/shaders/gl \
+cp -r /path/to/opagxray/res/gamedata/shaders/gl \
   /path/to/game/gamedata/shaders/gl
 ```
 
@@ -145,16 +156,16 @@ Launch:
 
 ```bash
 cd /path/to/game
-DYLD_LIBRARY_PATH=/path/to/OpenXVibeRay/bin/arm64/Release \
-  /path/to/OpenXVibeRay/bin/arm64/Release/xr_3da
+DYLD_LIBRARY_PATH=/path/to/opagxray/bin/arm64/Release \
+  /path/to/opagxray/bin/arm64/Release/xr_3da
 ```
 
 Launch directly into a saved single-player session:
 
 ```bash
 cd /path/to/game
-DYLD_LIBRARY_PATH=/path/to/OpenXVibeRay/bin/arm64/Release \
-  /path/to/OpenXVibeRay/bin/arm64/Release/xr_3da \
+DYLD_LIBRARY_PATH=/path/to/opagxray/bin/arm64/Release \
+  /path/to/opagxray/bin/arm64/Release/xr_3da \
   -start 'server(1/single/alife/load)' 'client(localhost)'
 ```
 
@@ -166,8 +177,8 @@ The bridge is the standard verification harness. Launch with:
 
 ```bash
 cd /path/to/game
-DYLD_LIBRARY_PATH=/path/to/OpenXVibeRay/bin/arm64/Release \
-  /path/to/OpenXVibeRay/bin/arm64/Release/xr_3da -agent_bridge
+DYLD_LIBRARY_PATH=/path/to/opagxray/bin/arm64/Release \
+  /path/to/opagxray/bin/arm64/Release/xr_3da -agent_bridge
 ```
 
 The default socket is:
@@ -179,7 +190,7 @@ The default socket is:
 Drive it with:
 
 ```bash
-python3 /path/to/OpenXVibeRay/tools/agentctl.py \
+python3 /path/to/opagxray/tools/agentctl.py \
   /path/to/game/appdata/agent_bridge.sock hello
 ```
 
@@ -199,9 +210,9 @@ bye
 Run a bridge script:
 
 ```bash
-python3 /path/to/OpenXVibeRay/tools/agentctl.py \
+python3 /path/to/opagxray/tools/agentctl.py \
   /path/to/game/appdata/agent_bridge.sock \
-  --script /path/to/OpenXVibeRay/tools/bridge_soak.txt
+  --script /path/to/opagxray/tools/bridge_soak.txt
 ```
 
 Screenshots are written under:
@@ -363,7 +374,7 @@ docs/
 
 ## Credits
 
-OpenXVibeRay is built on the work of the [OpenXRay team](https://github.com/OpenXRay/xray-16), the S.T.A.L.K.E.R. modding community, and earlier macOS support work by OpenXRay contributors including vertver and Lnd-stoL.
+Open Agentic XRay is built on the work of the [OpenXRay team](https://github.com/OpenXRay/xray-16), the S.T.A.L.K.E.R. modding community, and earlier macOS support work by OpenXRay contributors including vertver and Lnd-stoL.
 
 Development is done through human-AI collaboration with coding agents. The point is not to replace engineers; it is to make a large, old, real engine easier to understand, test, and evolve.
 
