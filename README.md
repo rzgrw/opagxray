@@ -1,6 +1,8 @@
-# OpenXVibeRay
+# Open Agentic XRay
 
-OpenXVibeRay is a detached fork of [OpenXRay](https://github.com/OpenXRay/xray-16) that treats the original X-Ray Engine as foundation, not scripture. The goal is a modern, self-testable, agent-driven S.T.A.L.K.E.R. runtime: stable and consistent frame times first, then native Metal/Vulkan rendering and LLM-authored world simulation.
+Open Agentic XRay is a detached fork of [OpenXRay](https://github.com/OpenXRay/xray-16) that treats the original X-Ray Engine as foundation, not scripture. The goal is a modern, self-testable, agent-driven S.T.A.L.K.E.R. runtime: stable and consistent frame times first, then native Metal/Vulkan rendering and LLM-authored world simulation.
+
+The name says what it is: the open X-Ray engine, made agentic. Agents build and test it, and agents will run its Zone. The repository short name `opagxray` stands for **Op**en **Ag**entic **XRay**. The project was formerly called OpenXVibeRay; some data-format identifiers (`openxviberay-*-v1`) keep the old name for compatibility.
 
 This is an engine project. It does not include S.T.A.L.K.E.R. game data, assets, or proprietary content.
 
@@ -263,7 +265,7 @@ docs/
 
 ## Credits
 
-OpenXVibeRay is built on the work of the [OpenXRay team](https://github.com/OpenXRay/xray-16), the S.T.A.L.K.E.R. modding community, and earlier macOS support work by OpenXRay contributors including vertver and Lnd-stoL.
+Open Agentic XRay is built on the work of the [OpenXRay team](https://github.com/OpenXRay/xray-16), the S.T.A.L.K.E.R. modding community, and earlier macOS support work by OpenXRay contributors including vertver and Lnd-stoL.
 
 Development is done through human-AI collaboration with coding agents. The point is not to replace engineers; it is to make a large, old, real engine easier to understand, test, and evolve.
 

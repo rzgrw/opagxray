@@ -1,4 +1,4 @@
-# OpenXVibeRay — Handover
+# Open Agentic XRay — Handover
 
 **Last updated:** 2026-11-08 (Gate 1 standalone tests and Metal M-R1 assessment merged into `dev`; prior status refresh was 2026-11-07 against `dev` `950a7820b`)
 **Written for:** a fresh coding agent (Codex) or engineer picking this repo up with zero prior context.

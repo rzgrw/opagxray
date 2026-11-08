@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent-bridge client for OpenXVibeRay. Protocol v1 (see
+"""Agent-bridge client for Open Agentic XRay. Protocol v1 (see
 docs/superpowers/specs/2026-07-04-agent-bridge-design.md).
 
 TARGET selects one game instance:

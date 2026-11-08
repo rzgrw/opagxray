@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage a private OpenXVibeRay GL runtime from an installed CoC base + patch.
+"""Stage a private Open Agentic XRay GL runtime from an installed CoC base + patch.
 
 Only database archives are imported. Scripts/config defaults stay in the original
 archives; runtime-written config overrides and appdata belong to this runtime.
@@ -116,7 +116,7 @@ def stage(base: Path, patch: Path, output: Path) -> dict:
     manifest_path = output / MANIFEST
     if output.exists() and any(output.iterdir()):
         if not manifest_path.is_file():
-            raise ValueError('Nonempty output is not a managed OpenXVibeRay runtime')
+            raise ValueError('Nonempty output is not a managed Open Agentic XRay runtime')
         prior = json.loads(manifest_path.read_text())
         if not isinstance(prior, dict) or prior.get('format') != FORMAT:
             raise ValueError('Output has an unrecognized staging manifest')

@@ -1,6 +1,6 @@
 # macOS Development Setup Guide
 
-This guide covers building OpenXVibeRay on macOS and staging a private Call of Chernobyl runtime for GL and agent-bridge verification.
+This guide covers building Open Agentic XRay on macOS and staging a private Call of Chernobyl runtime for GL and agent-bridge verification.
 
 ## Prerequisites
 

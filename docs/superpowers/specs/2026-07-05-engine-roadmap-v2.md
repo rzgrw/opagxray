@@ -1,4 +1,4 @@
-# OpenXVibeRay — Engine Roadmap v2 (Long-Term Vision)
+# Open Agentic XRay — Engine Roadmap v2 (Long-Term Vision)
 
 **Date:** 2026-07-05 (rev. 2: dual-native renderer decision, same day)
 **Status (2026-11-07):** Long-term dual-native/agentic-Zone vision retained; the renderer-first execution order below is superseded by **AI on GL**. [PLAN_STATUS.md](../../PLAN_STATUS.md) owns current implementation status and acceptance; [HANDOVER.md](../../HANDOVER.md) gives runtime context. Historical detailed milestones remain for reference, not automatic execution.

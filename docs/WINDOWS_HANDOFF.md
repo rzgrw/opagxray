@@ -6,7 +6,7 @@ Start here in the next agent session. The user is moving debugging and implement
 
 ## Goal and priorities
 
-OpenXVibeRay should combine justified improvements from IXRay and OpenXRay with its own roadmap. Stability and frame-time consistency are first. Keep the exact CoC 1.4.12 base + 1.4.22 patch content; record each engine overlay separately. No local performance gain or comparative benchmark has been established yet. Independence means our own roadmap/releases; upstream tracking and selective intake remain allowed. The GitHub fork relationship has been detached: `rzgrw/opagxray` is a standalone repository with no upstream PR flow. Branding, license changes and wholesale renderer/physics imports have not happened.
+Open Agentic XRay should combine justified improvements from IXRay and OpenXRay with its own roadmap. Stability and frame-time consistency are first. Keep the exact CoC 1.4.12 base + 1.4.22 patch content; record each engine overlay separately. No local performance gain or comparative benchmark has been established yet. Independence means our own roadmap/releases; upstream tracking and selective intake remain allowed. The GitHub fork relationship has been detached: `rzgrw/opagxray` is a standalone repository with no upstream PR flow. License changes and wholesale renderer/physics imports have not happened.
 
 Further AI authority expansion, native Metal/Vulkan work and broad DXMT/SDL/threading/audio migrations are held. Gate 1 Task 1 is integrated; the unmerged Gate 1 source (tag `archive/codex/ai-authority-spine-gate1` → `1d951aa07`) is recovery material, not ready to merge. Read PLAN_STATUS.md and the two OPENXRAY_*PERFORMANCE_AUDIT_2026-11-07.md reports.
 

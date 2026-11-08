@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GL macOS stability soak harness for OpenXVibeRay.
+"""GL macOS stability soak harness for Open Agentic XRay.
 
 This tool wraps the existing agent bridge. It intentionally starts with
 coarse, reliable signals: bridge state, process RSS, screenshots, logs, and

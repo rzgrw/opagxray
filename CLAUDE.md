@@ -1,8 +1,8 @@
-# OpenXVibeRay — Claude Code Project Guide
+# Open Agentic XRay — Claude Code Project Guide
 
 ## Project Overview
 
-OpenXVibeRay is a **detached fork** of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray) and is no longer in OpenXRay's GitHub fork network. OpenXRay (and IXRay) are **inspiration and foundation, not scripture**: there is no PR flow upstream; selective, reviewed intake of upstream fixes stays allowed with license notices preserved. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision.
+Open Agentic XRay is a **detached fork** of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray) and is no longer in OpenXRay's GitHub fork network. OpenXRay (and IXRay) are **inspiration and foundation, not scripture**: there is no PR flow upstream; selective, reviewed intake of upstream fixes stays allowed with license notices preserved. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision.
 
 - **Branches:** `main` is stable (`950a7820b` as of 2026-11-07; GitHub default) and moves only by fast-forward from `dev` after a recorded gate; `dev` is experimental integration. Feature work goes on short-lived branches that are merged then deleted, or archived as `archive/<name>` tags (`git fetch origin tag archive/<name>`, then `git switch -c <x> archive/<name>`). Commit/push only when asked.
 - **Platform:** development is moving from macOS to **Windows 11**. Mac results are historical Mac evidence; the Windows build, bridge, and runtime are not yet verified — start from [docs/windows-dev-setup.md](docs/windows-dev-setup.md) and [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md).

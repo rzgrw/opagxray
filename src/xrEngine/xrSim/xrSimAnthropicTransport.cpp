@@ -104,7 +104,7 @@ public:
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, long(config.timeoutMs));
         curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
         curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "OpenXVibeRay-xrSim/1");
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "OpenAgenticXRay-xrSim/1");
         curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, CheckCancelled);

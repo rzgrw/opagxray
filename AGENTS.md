@@ -1,10 +1,10 @@
-# OpenXVibeRay — Codex Project Guide
+# Open Agentic XRay — Codex Project Guide
 
 ## Project Overview
 
 **Windows continuation:** read [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md) first when restoring the 2026-11-07 transfer. Toolchain, build route, assets and bridge gaps: [docs/windows-dev-setup.md](docs/windows-dev-setup.md). The Windows bridge/export and current build inventories need validation; Mac acceptance is not Windows acceptance.
 
-OpenXVibeRay is a **detached fork** of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The original engine is **inspiration and foundation, not scripture**. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision. The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray); there is no PR flow upstream.
+Open Agentic XRay is a **detached fork** of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The original engine is **inspiration and foundation, not scripture**. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision. The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray); there is no PR flow upstream.
 
 - **Branches:** `main` (stable, `950a7820b`) moves only by fast-forward from `dev` after a recorded gate; `dev` is experimental integration. Feature work uses short-lived branches that are merged then deleted, or archived as `archive/<name>` tags (recover with `git fetch origin tag archive/<name>` then `git switch -c <x> archive/<name>`).
 
