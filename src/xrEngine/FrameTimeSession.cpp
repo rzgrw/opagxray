@@ -4,7 +4,18 @@
 #include <cstring>
 #include <limits>
 #include <cerrno>
-#ifndef _WIN32
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+#include <string>
+#else
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -224,7 +235,62 @@ FrameTimeReply CFrameTimeSession::Export(const char* appdata,Writer writer)
 {
     if (m_collector.GetStatus().state!=FrameTimeState::Stopped) return Reply(false,"not_stopped");
 #ifdef _WIN32
-    return Reply(false,"export_unavailable");
+    // Same contract as POSIX: no reparse-point (symlink/junction) traversal for the
+    // appdata and perf directories, exclusive create, never overwrite, delete only
+    // our own failed output. Directory handles opened without FILE_SHARE_DELETE pin
+    // both directories (no rename/replace) until the capture file is closed.
+    std::string base(appdata);
+    while(!base.empty() && (base.back()=='\\' || base.back()=='/')) base.pop_back();
+    const auto openDir=[](const std::string& path)
+    {
+        HANDLE h=::CreateFileA(path.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,
+            OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        BY_HANDLE_FILE_INFORMATION info{};
+        if(h!=INVALID_HANDLE_VALUE && (!::GetFileInformationByHandle(h,&info) ||
+            !(info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) || (info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)))
+        { ::CloseHandle(h);h=INVALID_HANDLE_VALUE; }
+        return h;
+    };
+    const HANDLE root=openDir(base);
+    if(root==INVALID_HANDLE_VALUE) return Reply(false,"appdata_open_failed");
+    const std::string perf=base+"\\perf";
+    if(!::CreateDirectoryA(perf.c_str(),nullptr) && ::GetLastError()!=ERROR_ALREADY_EXISTS)
+    { ::CloseHandle(root);return Reply(false,"perf_directory_failed"); }
+    const HANDLE dir=openDir(perf);::CloseHandle(root);
+    if(dir==INVALID_HANDLE_VALUE) return Reply(false,"perf_directory_failed");
+    static uint64_t serial=0; // primary thread, process-unique with PID; CREATE_NEW is authoritative
+    HANDLE out=INVALID_HANDLE_VALUE;char name[128]{};std::string target;
+    for(int tries=0;tries<128;++tries)
+    {
+        if(serial==std::numeric_limits<uint64_t>::max()) break;
+        std::snprintf(name,sizeof(name),"capture-%lu-%" PRIu64 ".csv",::GetCurrentProcessId(),++serial);
+        target=perf+"\\"+name;
+        out=::CreateFileA(target.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(out!=INVALID_HANDLE_VALUE || ::GetLastError()!=ERROR_FILE_EXISTS) break;
+    }
+    if(out==INVALID_HANDLE_VALUE) { ::CloseHandle(dir);return Reply(false,"exclusive_create_failed"); }
+    const int fd=::_open_osfhandle(reinterpret_cast<intptr_t>(out),_O_WRONLY|_O_BINARY); // binary: same bytes as POSIX
+    FILE* file=fd>=0?::_fdopen(fd,"wb"):nullptr;
+    bool written=false;
+    if(file)
+    {
+        auto metadata=m_metadata;
+        for(int i=0;i<FrameTimeMetadata::Count;++i)
+            if(m_unknownMetadata & (1u<<i)) metadata.Set(static_cast<FrameTimeMetadata::Field>(i),"unknown");
+        written=writer(file,m_collector,metadata);
+        if(std::fflush(file)!=0) written=false;
+        if(std::fclose(file)!=0) written=false;
+    }
+    else if(fd>=0) ::_close(fd);
+    else ::CloseHandle(out);
+    if(!written) ::DeleteFileA(target.c_str()); // only this newly created, failed output
+    ::CloseHandle(dir);
+    if(!written) return Reply(false,"write_failed: capture retained");
+    m_exported=true;
+    auto result=Status();
+    char summary[sizeof(result.text)];std::strcpy(summary,result.text);
+    std::snprintf(result.text,sizeof(result.text),"path=perf/%s %.1700s",name,summary);
+    return result;
 #else
     const int root=::open(appdata,O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
     if(root<0) return Reply(false,"appdata_open_failed");
