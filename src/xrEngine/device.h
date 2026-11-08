@@ -160,6 +160,11 @@ public:
     bool m_allowWindowDrag{}; // For windowed mode
     bool IsAnselActive{};
 
+    // Window size UpdateWindowProps chose when the requested mode didn't fit
+    // the display ({0, 0} when not scaled). The resulting size-change event is
+    // ours, not a user resize, and must not replace the requested mode.
+    SDL_Point m_scaledWindowSize{};
+
     CRenderDevice()
     {
         Timer.Start();

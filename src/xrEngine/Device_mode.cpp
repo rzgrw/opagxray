@@ -146,12 +146,24 @@ void CRenderDevice::UpdateWindowProps()
         // scales it into the actual drawable.
         int w = int(psDeviceMode.Width), h = int(psDeviceMode.Height);
         SDL_Rect usable;
-        if (SDL_GetDisplayUsableBounds(psDeviceMode.Monitor, &usable) == 0 && (w > usable.w || h > usable.h))
+#ifdef XR_PLATFORM_WINDOWS
+        // Windows does not clamp windows to the work area (the title bar may
+        // go off-screen, the taskbar may be covered), so only a window larger
+        // than the whole display needs scaling. Measuring against the work
+        // area turned the desktop resolution into an odd smaller mode
+        // (2560x1440 -> 2453x1380 with a 60 px taskbar).
+        const int boundsResult = SDL_GetDisplayBounds(psDeviceMode.Monitor, &usable);
+#else
+        const int boundsResult = SDL_GetDisplayUsableBounds(psDeviceMode.Monitor, &usable);
+#endif
+        m_scaledWindowSize = {};
+        if (boundsResult == 0 && (w > usable.w || h > usable.h))
         {
             const float scale = std::min(float(usable.w) / float(w), float(usable.h) / float(h));
             w = int(float(w) * scale);
             h = int(float(h) * scale);
-            Msg("~ Window %ux%u exceeds display %u usable area %dx%d, window scaled to %dx%d",
+            m_scaledWindowSize = { w, h };
+            Msg("~ Window %ux%u exceeds display %u area %dx%d, window scaled to %dx%d",
                 psDeviceMode.Width, psDeviceMode.Height, psDeviceMode.Monitor, usable.w, usable.h, w, h);
         }
 
