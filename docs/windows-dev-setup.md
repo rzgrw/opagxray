@@ -82,12 +82,34 @@ Keep this directory immutable. Obtain the separate 1.4.12 base and 1.4.22 patch 
 
 ## Agent bridge and telemetry on Windows
 
-- `src/xrEngine/AgentBridge.cpp:6` wraps the whole bridge in `#ifndef XR_PLATFORM_WINDOWS`; `g_agent_bridge` is defined once for all platforms at the top of the file (a duplicate in the old Windows branch was removed in `bec14accc`), so on Windows the bridge is a stub. Without it, GUI automation fell back to foreground-window + `mouse_event`/`keybd_event` input; Orca synthetic clicks and `SetCursorPos` are ignored by SDL.
-- `tools/agentctl.py:11` uses `socket.AF_UNIX` unconditionally.
-- `src/xrEngine/FrameTimeSession.cpp:213-214` returns `export_unavailable` on `_WIN32`.
-- `tools/gl_macos_soak.py:23` hardcodes a historical Mac path (`/Users/rz/Downloads/...`); the script is macOS-only as written.
+**Transport (verified 2026-11-08, menu scene only).** Same protocol, queues and verbs as POSIX (`src/xrEngine/AgentBridge.cpp`); only a small socket shim differs. Windows uses Winsock TCP bound to `127.0.0.1` only (`SO_EXCLUSIVEADDRUSE`, non-inheritable socket, `TCP_NODELAY`). Python on Windows has no `socket.AF_UNIX`, so Winsock `AF_UNIX` was not used. Options:
 
-Suggested seam: Winsock `AF_UNIX` (Windows 10 1803+), so `agentctl.py` works unchanged; or a named pipe plus an `agentctl.py --pipe` option. Frame-time export needs the same exclusive, stopped-only, no-overwrite behavior as POSIX. Until a seam lands, the Windows baseline gate is manual: in Cordon, test movement, private save/reload, UI/inventory/menu and quit, and keep logs and inspected screenshots.
+- `-agent_bridge` turns the bridge on. `-agent_bridge_port <n>` (0..65535) picks the port. Without it, or with 0, the OS picks a free port.
+- The bound port is written atomically (temp file + `MoveFileEx`) to `<appdata>\agent_bridge.port`. The file is deleted at startup (stale) and again on clean exit. A bind failure (for example a port in use, `10048`) or an invalid port logs `! agent_bridge: ...` and the game runs without a bridge; it never asserts.
+- `tools/agentctl.py TARGET ...` takes a Unix socket path, `tcp:HOST:PORT`, an `agent_bridge.port` file, or an appdata dir containing one. `--wait S` retries until the instance is up. Tests: `py -m unittest tools.tests.test_agentctl`.
+
+**Background mode: `-agent_background`** (off unless passed; any platform, verified on Windows). For unattended instances next to a user's desktop:
+- The window is shown without activation (`SDL_HINT_WINDOW_NO_ACTIVATION_WHEN_SHOWN`, no `SDL_RaiseWindow`, no `SW_RESTORE`). It is a `WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE` window (no taskbar or Alt+Tab entry, never topmost), always windowed (fullscreen is forced to borderless windowed), and parked just left of the leftmost display. It is never minimized. GL keeps rendering there and `shot` images are correct.
+- The main window is treated as permanently active: no task-scheduler pause and no input reset on focus loss, and `rs_always_active` is set. There is no OS input grab, cursor hide or cursor warp. Bridge `key`/`mouse` events go straight into SDL's queue and need no focus (verified: menu navigation, console toggle, cursor motion).
+- No audio device is opened (same path as `-nosound`; `snd_device ?`). There is no splash window, the system sticky-keys settings are left alone, and error/assert dialogs are suppressed (BugTrap save-report mode; asserts log and abort).
+
+**Several instances.** Give each instance its own appdata through its own fsgame file, and its own port (or 0). Logs, screenshots, `perf/`, `imgui.ini`, the shader cache, `user.ltx`, saves and the port file then stay in that appdata. Example, from the repo root in Git Bash, with a runtime staged at `build/runtime/coc`:
+
+```bash
+RT=build/runtime/coc
+mkdir -p $RT/appdata_a && printf 'renderer renderer_rgl\nvid_mode 1024x576\n' > $RT/appdata_a/user.ltx
+sed 's/^\$app_data_root\$.*/$app_data_root$ = true| false| $fs_root$| appdata_a\\/' $RT/fsgame.ltx > $RT/fsgame_a.ltx
+bin/x64/Release/xrEngine.exe -fsltx "$(cygpath -w $RT/fsgame_a.ltx)" \
+    -agent_bridge -agent_bridge_port 0 -agent_background -nointro &
+py tools/agentctl.py --wait 90 $RT/appdata_a hello
+py tools/agentctl.py $RT/appdata_a state
+```
+
+Two instances, one on 47101 and one on an OS-chosen port, answered interleaved `state`/`shot` calls from two threads over simultaneous connections. A 60 s poll of the foreground window during launch and driving never found either instance in the foreground. Not yet exercised on Windows: in-level gameplay (movement, save/load, `agent.*`/`ai.*` verbs) and long soaks.
+
+**Frame-time export** works on Windows (`perf.export` → `perf/capture-<pid>-<n>.csv`, LF bytes). It follows the POSIX contract: stopped-only, exclusive `CREATE_NEW`, never overwrites, no reparse-point traversal, deletes only its own failed output, and keeps the appdata/perf directories pinned with open handles. `tools/frame_time_report.py` parses the output; asset-provenance acceptance is still the known gap.
+
+Still POSIX-only: `tools/gl_macos_soak.py` (hardcoded Mac path, AF_UNIX) and the `tools/frame_time_provenance.py` socket-identity checks (AF_UNIX `proc_pidfdinfo`).
 
 ## Known Windows issues
 

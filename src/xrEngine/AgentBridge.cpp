@@ -6,8 +6,6 @@
 
 CAgentBridge* g_agent_bridge = nullptr;
 
-#ifndef XR_PLATFORM_WINDOWS
-
 #include "XR_IOConsole.h"
 #include "IGame_Level.h"
 #include "IGame_Persistent.h"
@@ -18,17 +16,225 @@ CAgentBridge* g_agent_bridge = nullptr;
 
 #include <SDL.h>
 #include <sstream>
+#include <vector>
+#ifdef XR_PLATFORM_WINDOWS
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <vector>
 #include <poll.h>
 #include <unistd.h>
+#endif
 
-static int s_clientFd = -1; // owned by socket thread only
+// ---- transport shim ----
+// The protocol, queues and verbs are shared; only these few socket calls differ.
+// POSIX keeps the original Unix-socket calls verbatim; Windows uses Winsock TCP.
+namespace
+{
+#ifdef XR_PLATFORM_WINDOWS
+using bridge_socket = SOCKET;
+constexpr bridge_socket invalid_socket = INVALID_SOCKET;
+static_assert(sizeof(bridge_socket) == sizeof(CAgentBridge::socket_handle), "socket handle size");
+
+int socket_poll_readable(bridge_socket s, int timeoutMs)
+{
+    WSAPOLLFD p{ s, POLLRDNORM, 0 };
+    return ::WSAPoll(&p, 1, timeoutMs);
+}
+bridge_socket socket_accept(bridge_socket listener)
+{
+    const bridge_socket s = ::accept(listener, nullptr, nullptr);
+    if (s != invalid_socket)
+    {
+        BOOL noDelay = TRUE; // request/response protocol: do not let Nagle + delayed ACK add latency
+        ::setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
+    }
+    return s;
+}
+bool socket_write(bridge_socket s, const std::string& out)
+{
+    return ::send(s, out.c_str(), int(out.size()), 0) != SOCKET_ERROR;
+}
+int socket_read(bridge_socket s, char* buf, int size) { return ::recv(s, buf, size, 0); }
+void socket_close(bridge_socket s) { ::closesocket(s); }
+#else
+using bridge_socket = int;
+constexpr bridge_socket invalid_socket = -1;
+
+int socket_poll_readable(bridge_socket s, int timeoutMs)
+{
+    pollfd p{ s, POLLIN, 0 };
+    return ::poll(&p, 1, timeoutMs);
+}
+bridge_socket socket_accept(bridge_socket listener) { return ::accept(listener, nullptr, nullptr); }
+bool socket_write(bridge_socket s, const std::string& out) { return ::write(s, out.c_str(), out.size()) >= 0; }
+ssize_t socket_read(bridge_socket s, char* buf, size_t size) { return ::read(s, buf, size); }
+void socket_close(bridge_socket s) { ::close(s); }
+#endif
+
+// "-name" as a whole token: "-agent_bridge" must not match "-agent_bridge_port".
+pcstr find_flag(pcstr params, pcstr name)
+{
+    const size_t len = xr_strlen(name);
+    for (pcstr p = strstr(params, name); p; p = strstr(p + 1, name))
+    {
+        const bool startOk = p == params || p[-1] == ' ' || p[-1] == '\t';
+        const char end = p[len];
+        if (startOk && (end == '\0' || end == ' ' || end == '\t'))
+            return p;
+    }
+    return nullptr;
+}
+} // namespace
+
+static bridge_socket s_clientFd = invalid_socket; // owned by socket thread only
+
+bool AgentBackgroundMode()
+{
+    static const bool background = find_flag(Core.Params, "-agent_background") != nullptr;
+    return background;
+}
+
+// Background instances must keep simulating while never focused (see device.cpp
+// OnWindowActivate); bridge instances need the same for injected input.
+static void apply_always_active_policy()
+{
+    if (AgentBackgroundMode())
+        psDeviceFlags.set(rsAlwaysActive, true);
+}
+
+#ifdef XR_PLATFORM_WINDOWS
+
+namespace
+{
+// Atomic publish: write a temp file, then rename over the target, so a client
+// polling for the file never reads a partial port number.
+bool write_port_file(pcstr path, u16 port)
+{
+    string_path tmp;
+    xr_sprintf(tmp, "%s.%lu.tmp", path, ::GetCurrentProcessId());
+    const HANDLE h = ::CreateFileA(tmp, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        return false;
+    char text[16];
+    const int len = xr_sprintf(text, "%u\n", unsigned(port));
+    DWORD written = 0;
+    const bool ok = len > 0 && ::WriteFile(h, text, DWORD(len), &written, nullptr) && written == DWORD(len) &&
+        ::FlushFileBuffers(h);
+    ::CloseHandle(h);
+    if (ok && ::MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        return true;
+    ::DeleteFileA(tmp);
+    return false;
+}
+} // namespace
 
 void CAgentBridge::Initialize()
 {
-    pcstr opt = strstr(Core.Params, "-agent_bridge");
+    apply_always_active_policy();
+    pcstr opt = find_flag(Core.Params, "-agent_bridge");
+    if (!opt || g_agent_bridge)
+        return;
+
+    unsigned port = 0; // 0: the OS picks a free port; agent_bridge.port tells clients which
+    if (pcstr portOpt = find_flag(Core.Params, "-agent_bridge_port"))
+    {
+        char tail = 0;
+        const int rc = sscanf(portOpt + xr_strlen("-agent_bridge_port"), " %u%c", &port, &tail);
+        if (rc < 1 || (rc == 2 && tail != ' ' && tail != '\t') || port > 65535)
+        {
+            Msg("! agent_bridge: invalid -agent_bridge_port (expected 0..65535); bridge disabled");
+            return;
+        }
+    }
+
+    string_path portFile{};
+    FS.update_path(portFile, "$app_data_root$", "agent_bridge.port");
+
+    CAgentBridge* bridge = xr_new<CAgentBridge>(u16(port), portFile);
+    if (!bridge->m_ready)
+    {
+        xr_delete(bridge);
+        Msg("! agent_bridge: disabled (startup failed)");
+        return;
+    }
+    // Agent-driven sessions run without OS window focus: keep the game
+    // simulating and accepting input as if focused, or every command
+    // lands in a paused world.
+    psDeviceFlags.set(rsAlwaysActive, true);
+    g_agent_bridge = bridge;
+}
+
+CAgentBridge::CAgentBridge(u16 port, const char* portFilePath)
+{
+    xr_strcpy(m_socketPath, portFilePath);
+    ::DeleteFileA(m_socketPath); // a stale port file from a crashed run must not point clients at a dead port
+
+    WSADATA wsa{};
+    if (0 != ::WSAStartup(MAKEWORD(2, 2), &wsa))
+    {
+        Msg("! agent_bridge: WSAStartup failed");
+        return;
+    }
+    m_wsaStarted = true;
+
+    const SOCKET s = ::WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+    if (s == INVALID_SOCKET)
+    {
+        Msg("! agent_bridge: socket() failed (%d)", ::WSAGetLastError());
+        return;
+    }
+    BOOL exclusive = TRUE; // no other process may bind the same port while we hold it
+    ::setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // loopback only, never a remote interface
+    addr.sin_port = htons(port);
+    int addrLen = sizeof(addr);
+    if (0 != ::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) || 0 != ::listen(s, 1) ||
+        0 != ::getsockname(s, reinterpret_cast<sockaddr*>(&addr), &addrLen))
+    {
+        Msg("! agent_bridge: cannot listen on 127.0.0.1:%u (%d)", unsigned(port), ::WSAGetLastError());
+        ::closesocket(s);
+        return;
+    }
+    m_listenFd = socket_handle(s);
+    const unsigned bound = ntohs(addr.sin_port);
+
+    m_portFileWritten = write_port_file(m_socketPath, u16(bound));
+    if (!m_portFileWritten)
+        Msg("~ agent_bridge: could not write %s (error %lu); clients need the port from this log", m_socketPath,
+            ::GetLastError());
+
+    m_thread = std::thread([this] { SocketThreadProc(); });
+    m_ready = true;
+    Msg("* agent_bridge: listening on tcp:127.0.0.1:%u (port file %s)", bound, m_socketPath);
+}
+
+CAgentBridge::~CAgentBridge()
+{
+    m_shutdown.store(true, std::memory_order_release);
+    if (m_thread.joinable())
+        m_thread.join(); // bounded: poll timeouts are <=100ms
+    if (m_listenFd != socket_handle(INVALID_SOCKET))
+        ::closesocket(SOCKET(m_listenFd)); // after join: the thread never polls a closed handle
+    if (m_portFileWritten)
+        ::DeleteFileA(m_socketPath);
+    if (m_wsaStarted)
+        ::WSACleanup();
+    if (m_ready)
+        Msg("* agent_bridge: closed");
+}
+
+#else // POSIX: Unix domain socket
+
+void CAgentBridge::Initialize()
+{
+    apply_always_active_policy();
+    pcstr opt = find_flag(Core.Params, "-agent_bridge");
     if (!opt || g_agent_bridge)
         return;
 
@@ -45,8 +251,6 @@ void CAgentBridge::Initialize()
 
     g_agent_bridge = xr_new<CAgentBridge>(path);
 }
-
-void CAgentBridge::Destroy() { xr_delete(g_agent_bridge); }
 
 CAgentBridge::CAgentBridge(const char* socketPath)
 {
@@ -77,17 +281,21 @@ CAgentBridge::~CAgentBridge()
     Msg("* agent_bridge: closed");
 }
 
+#endif // XR_PLATFORM_WINDOWS
+
+void CAgentBridge::Destroy() { xr_delete(g_agent_bridge); }
+
 void CAgentBridge::SocketThreadProc()
 {
+    const bridge_socket listener = bridge_socket(m_listenFd);
     std::string inbuf;
     while (!m_shutdown.load(std::memory_order_acquire))
     {
-        if (s_clientFd < 0) // accept phase
+        if (s_clientFd == invalid_socket) // accept phase
         {
-            pollfd p{ m_listenFd, POLLIN, 0 };
-            if (::poll(&p, 1, 100) <= 0)
+            if (socket_poll_readable(listener, 100) <= 0)
                 continue;
-            s_clientFd = ::accept(m_listenFd, nullptr, nullptr);
+            s_clientFd = socket_accept(listener);
             inbuf.clear();
             continue;
         }
@@ -103,27 +311,26 @@ void CAgentBridge::SocketThreadProc()
                 out = std::move(m_responses.front());
                 m_responses.pop_front();
             }
-            if (::write(s_clientFd, out.c_str(), out.size()) < 0)
+            if (!socket_write(s_clientFd, out))
             {
-                ::close(s_clientFd);
-                s_clientFd = -1;
+                socket_close(s_clientFd);
+                s_clientFd = invalid_socket;
                 break;
             }
         }
-        if (s_clientFd < 0)
+        if (s_clientFd == invalid_socket)
             continue;
 
-        pollfd p{ s_clientFd, POLLIN, 0 };
-        const int rc = ::poll(&p, 1, 20); // short: responses need timely flushing
+        const int rc = socket_poll_readable(s_clientFd, 20); // short: responses need timely flushing
         if (rc <= 0)
             continue;
 
         char chunk[4096];
-        const ssize_t n = ::read(s_clientFd, chunk, sizeof(chunk));
+        const auto n = socket_read(s_clientFd, chunk, sizeof(chunk));
         if (n <= 0) // disconnect: drop pending work, re-accept
         {
-            ::close(s_clientFd);
-            s_clientFd = -1;
+            socket_close(s_clientFd);
+            s_clientFd = invalid_socket;
             std::lock_guard guard{ m_lock };
             m_requests.clear();
             m_responses.clear();
@@ -142,10 +349,10 @@ void CAgentBridge::SocketThreadProc()
             m_requests.push_back(std::move(line));
         }
     }
-    if (s_clientFd >= 0)
+    if (s_clientFd != invalid_socket)
     {
-        ::close(s_clientFd);
-        s_clientFd = -1;
+        socket_close(s_clientFd);
+        s_clientFd = invalid_socket;
     }
 }
 
@@ -632,4 +839,3 @@ std::string CAgentBridge::VerbAgentPackSpawn(const std::string& payload, bool& o
     return "spawned " + registered + " ids=" + format_spawned_ids(ids);
 }
 
-#endif // XR_PLATFORM_WINDOWS

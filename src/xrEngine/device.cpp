@@ -494,7 +494,8 @@ void CRenderDevice::Run()
     SDL_HideWindow(m_sdlWnd); // workaround for SDL bug
     UpdateWindowProps();
     SDL_ShowWindow(m_sdlWnd);
-    SDL_RaiseWindow(m_sdlWnd);
+    if (!AgentBackgroundMode()) // background instances never take focus
+        SDL_RaiseWindow(m_sdlWnd);
 }
 
 void CRenderDevice::Shutdown()
@@ -644,6 +645,13 @@ void CRenderDevice::OnWindowActivate(SDL_Window* window, bool activated)
         }
         return;
     }
+
+    // Background instances are never focused by design: treat the main window as
+    // permanently active so focus changes neither pause the task scheduler nor
+    // reset input state (bridge input is injected straight into the SDL queue).
+    // CInput::GrabInput skips the OS-level grab in this mode.
+    if (AgentBackgroundMode())
+        activated = true;
 
     if (!GEnv.isDedicatedServer && activated)
         pInput->GrabInput(true);

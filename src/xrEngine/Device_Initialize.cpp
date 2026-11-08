@@ -2,12 +2,13 @@
 #include "embedded_resources_management.h"
 
 #include "xr_input.h"
+#include "AgentBridge.h"
 #include "GameFont.h"
 #include "PerformanceAlert.hpp"
 #include "xrCore/ModuleLookup.hpp"
 
 #include <SDL.h>
-#ifdef IMGUI_ENABLE_VIEWPORTS
+#if defined(IMGUI_ENABLE_VIEWPORTS) || defined(XR_PLATFORM_WINDOWS)
 #   include <SDL_syswm.h>
 #endif
 
@@ -69,6 +70,14 @@ void CRenderDevice::Initialize()
 
         xr_strcpy(Core.ApplicationTitle, title);
         SetSDLSettings(title);
+        if (AgentBackgroundMode())
+        {
+            // Unattended instance: showing the window must never take focus from
+            // the user, and it stays off the taskbar / Alt+Tab list.
+            SDL_SetHint(SDL_HINT_WINDOW_NO_ACTIVATION_WHEN_SHOWN, "1");
+            flags |= SDL_WINDOW_SKIP_TASKBAR;
+            flags &= ~SDL_WINDOW_ALWAYS_ON_TOP;
+        }
 
         m_sdlWnd = SDL_CreateWindow(title, 0, 0, 640, 480, flags);
         R_ASSERT3(m_sdlWnd, "Unable to create SDL window", SDL_GetError());
@@ -77,6 +86,26 @@ void CRenderDevice::Initialize()
         SDL_SetWindowMinimumSize(m_sdlWnd, 256, 192);
         xrDebug::SetWindowHandler(this);
         ExtractAndSetWindowIcon(m_sdlWnd, icon);
+
+#ifdef XR_PLATFORM_WINDOWS
+        // SDL2 ignores SDL_WINDOW_SKIP_TASKBAR on Windows. Set it directly while
+        // the window is still hidden: a tool window has no taskbar button and is
+        // not in Alt+Tab, and WS_EX_NOACTIVATE keeps even a stray click from
+        // activating it. Bridge input never needs OS focus.
+        if (AgentBackgroundMode())
+        {
+            SDL_SysWMinfo info;
+            SDL_VERSION(&info.version);
+            if (SDL_GetWindowWMInfo(m_sdlWnd, &info) && info.subsystem == SDL_SYSWM_WINDOWS)
+            {
+                const HWND hwnd = info.info.win.window;
+                const LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, (exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & ~WS_EX_APPWINDOW);
+            }
+            else
+                Msg("~ agent_background: no native window handle; taskbar entry not suppressed");
+        }
+#endif
 
         TracySetProgramName(title);
     }

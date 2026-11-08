@@ -227,11 +227,12 @@ CApplication::CApplication(pcstr commandLine, GameModule* game, std::span<Render
 
 #ifdef XR_PLATFORM_WINDOWS
     AccessibilityShortcuts shortcuts;
-    if (!GEnv.isDedicatedServer)
+    if (!GEnv.isDedicatedServer && !strstr(commandLine, "-agent_background")) // system-wide setting: leave the user's alone
         shortcuts.Disable();
 #endif
 
-    if (!strstr(commandLine, "-nosplash"))
+    // -agent_background: no (topmost) splash window over the user's desktop.
+    if (!strstr(commandLine, "-nosplash") && !strstr(commandLine, "-agent_background"))
     {
         const bool topmost = !strstr(commandLine, "-splashnotop");
         ShowSplash(topmost);

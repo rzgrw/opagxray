@@ -2,6 +2,30 @@
 
 #include "xrCore/xr_token.h"
 #include "xr_input.h"
+#include "AgentBridge.h"
+
+namespace
+{
+// -agent_background: park the window just left of the leftmost display. It stays
+// a real, shown, non-minimized window (GL keeps rendering and presenting) but
+// never covers any part of the user's desktop. SDL moves it with SWP_NOACTIVATE.
+void PlaceBackgroundWindow(SDL_Window* window)
+{
+    int minX = 0, minY = 0;
+    for (int i = 0, n = SDL_GetNumVideoDisplays(); i < n; ++i)
+    {
+        SDL_Rect r;
+        if (SDL_GetDisplayBounds(i, &r) == 0)
+        {
+            minX = std::min(minX, r.x);
+            minY = std::min(minY, r.y);
+        }
+    }
+    int w = 0, h = 0;
+    SDL_GetWindowSize(window, &w, &h);
+    SDL_SetWindowPosition(window, minX - w - 64, minY);
+}
+} // namespace
 
 xr_vector<xr_token> vid_monitor_token;
 xr_map<u32, xr_vector<xr_token>> vid_mode_token;
@@ -120,6 +144,13 @@ void CRenderDevice::UpdateWindowProps()
         psDeviceMode.Monitor = 0;
     }
 
+    if (AgentBackgroundMode() && psDeviceMode.WindowStyle != rsWindowed &&
+        psDeviceMode.WindowStyle != rsWindowedBorderless)
+    {
+        Msg("* agent_background: forcing windowed mode (no fullscreen, no display mode change)");
+        psDeviceMode.WindowStyle = rsWindowedBorderless;
+    }
+
     const bool windowed = psDeviceMode.WindowStyle != rsFullscreen;
     SelectResolution(windowed);
 
@@ -191,6 +222,9 @@ void CRenderDevice::UpdateWindowProps()
         mode.refresh_rate = psDeviceMode.RefreshRate;
         SDL_SetWindowDisplayMode(m_sdlWnd, &mode);
     }
+
+    if (AgentBackgroundMode())
+        PlaceBackgroundWindow(m_sdlWnd);
 
     SDL_PumpEvents();
     UpdateWindowRects();

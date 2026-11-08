@@ -6,11 +6,26 @@ XRSOUND_API u32 snd_device_id = u32(-1);
 
 ISoundScene* DefaultSoundScene{};
 
+namespace
+{
+// CreateDevicesList runs as a startup task that may start before
+// Core.Initialize has filled Core.Params; the process command line is always set.
+bool HasStartupParam(pcstr name)
+{
+#ifdef XR_PLATFORM_WINDOWS
+    if (strstr(GetCommandLineA(), name))
+        return true;
+#endif
+    return Core.Params && strstr(Core.Params, name);
+}
+} // namespace
+
 void CSoundManager::CreateDevicesList()
 {
     ZoneScoped;
 
-    static bool noSound = strstr(Core.Params, "-nosound");
+    // -agent_background instances are muted: never open an audio device.
+    static bool noSound = HasStartupParam("-nosound") || HasStartupParam("-agent_background");
 
     SoundRender = xr_new<CSoundRender_CoreA>(*this);
 
