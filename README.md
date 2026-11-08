@@ -11,6 +11,7 @@ This is an engine project. It does not include S.T.A.L.K.E.R. game data, assets,
 - Home: [github.com/rzgrw/opagxray](https://github.com/rzgrw/opagxray). It is not in OpenXRay's GitHub fork network.
 - Upstream relationship: OpenXRay and IXRay are inspiration and selective donors. There is no PR flow upstream; individual fixes are taken in after review, with attribution and license notices preserved.
 - Branches: `main` is stable (default branch) and moves only by fast-forward from `dev` after a recorded gate. `dev` is experimental integration. Feature work goes on short-lived branches that are merged then deleted, or archived as `archive/<name>` tags.
+- README flow: this `dev` README is the live one (status, newest build routes, known issues). The [`main` README](https://github.com/rzgrw/opagxray/blob/main/README.md) describes the project and the stable code. When `main` fast-forwards to `dev` after a gate, this README becomes the `main` README as is; between gates only descriptive sections of the `main` README may be refreshed (via a docs-only commit on `main` that is then merged back into `dev`, keeping this file), so fast-forwarding stays possible.
 
 ## Current Status
 
