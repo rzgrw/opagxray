@@ -183,6 +183,14 @@ void CHW::Reset()
     pFB = 0;
     UpdateViews();
 
+    // The GL context outlives the reset, and with it the viewport, which
+    // defaults to the drawable size at context creation. Paths that never set
+    // it explicitly (main menu, loading screen, UI) would keep rendering into
+    // the old-size corner of the resized targets. DX11 is unaffected: it sets
+    // the viewport every frame (rmNormal in CBackend::OnFrameBegin).
+    const auto [width, height] = GetSurfaceSize();
+    CHK_GL(glViewport(0, 0, width, height));
+
     UpdateVSync();
 }
 
