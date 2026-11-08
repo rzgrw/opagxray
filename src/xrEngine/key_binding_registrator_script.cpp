@@ -312,10 +312,10 @@ void key_binding_registrator::script_register(lua_State* luaState)
                 { "DIK_INSERT",                 int(SDL_SCANCODE_INSERT) },
 
                 { "DIK_HOME",                   int(SDL_SCANCODE_HOME) },
-                { "DIK_PGDN",                   int(SDL_SCANCODE_PAGEUP) },
+                { "DIK_PGUP",                   int(SDL_SCANCODE_PAGEUP) },
                 { "DIK_DELETE",                 int(SDL_SCANCODE_DELETE) },
                 { "DIK_END",                    int(SDL_SCANCODE_END) },
-                { "DIK_PGUP",                   int(SDL_SCANCODE_PAGEDOWN) },
+                { "DIK_PGDN",                   int(SDL_SCANCODE_PAGEDOWN) },
 
                 { "DIK_RIGHT",                  int(SDL_SCANCODE_RIGHT) },
                 { "DIK_LEFT",                   int(SDL_SCANCODE_LEFT) },
