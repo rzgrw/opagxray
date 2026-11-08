@@ -344,6 +344,14 @@ void key_binding_registrator::script_register(lua_State* luaState)
                 { "DIK_NUMPADPERIOD",           int(SDL_SCANCODE_KP_PERIOD) },
                 { "DIK_NONUSBACKSLASH",         int(SDL_SCANCODE_NONUSBACKSLASH) },
                 { "DIK_APPLICATION",            int(SDL_SCANCODE_APPLICATION) },
+
+                // DirectInput alias names listed in CoC's lua_help.script DIK_keys dump
+                // (dinput.h: DIK_NEXT = PgDn, DIK_DECIMAL = numpad '.', DIK_APPS = menu key,
+                // DIK_SYSRQ = the Print Screen/SysRq key)
+                { "DIK_NEXT",                   int(SDL_SCANCODE_PAGEDOWN) },
+                { "DIK_DECIMAL",                int(SDL_SCANCODE_KP_PERIOD) },
+                { "DIK_APPS",                   int(SDL_SCANCODE_APPLICATION) },
+                { "DIK_SYSRQ",                  int(SDL_SCANCODE_PRINTSCREEN) },
                 { "DIK_POWER",                  int(SDL_SCANCODE_POWER) },
                 { "DIK_NUMPADEQUALS",           int(SDL_SCANCODE_KP_EQUALS) },
 
