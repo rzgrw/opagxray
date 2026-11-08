@@ -55,6 +55,10 @@ constexpr SDL_MessageBoxButtonData buttons[] =
 
 AssertionResult xrDebug::ShowMessage(pcstr title, pcstr message, bool simpleMode)
 {
+    // -agent_background: unattended instance beside the user's desktop; never
+    // pop a (system-modal) dialog. The failure is already in the log; abort.
+    if (strstr(Core.Params, "-agent_background"))
+        return AssertionResult::abort;
 #ifdef XR_PLATFORM_WINDOWS // because Windows default Message box is fancy
     HWND hwnd = nullptr;
     if (windowHandler)
@@ -422,7 +426,8 @@ void xrDebug::SetupExceptionHandler()
     SetErrorMode(prevMode | SEM_NOGPFAULTERRORBOX);
     BT_InstallSehFilter();
 
-    if (!GEnv.isDedicatedServer && !strstr(commandLine, "-silent_error_mode"))
+    if (!GEnv.isDedicatedServer && !strstr(commandLine, "-silent_error_mode") &&
+        !strstr(commandLine, "-agent_background"))
         BT_SetActivityType(BTA_SHOWUI);
     else
         BT_SetActivityType(BTA_SAVEREPORT);
@@ -612,7 +617,7 @@ LONG WINAPI xrDebug::UnhandledFilter(EXCEPTION_POINTERS* exPtrs)
 void xr_terminate()
 {
 #if defined(XR_PLATFORM_WINDOWS)
-    if (strstr(GetCommandLine(), "-silent_error_mode"))
+    if (strstr(GetCommandLine(), "-silent_error_mode") || strstr(GetCommandLine(), "-agent_background"))
         exit(-1);
 #endif
     //ScopeLock lock(&failLock);

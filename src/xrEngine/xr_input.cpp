@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "xr_input.h"
+#include "AgentBridge.h"
 #include "IInputReceiver.h"
 #include "GameFont.h"
 #include "XR_IOConsole.h"
@@ -611,6 +612,8 @@ bool CInput::iGetAsyncMousePos(Ivector2& p, bool global /*= false*/) const
 
 bool CInput::iSetMousePos(const Ivector2& p, bool global /*= false*/) const
 {
+    if (AgentBackgroundMode())
+        return false; // warping would move the user's real cursor
     if (global)
     {
 #if SDL_HAS_CAPTURE_AND_GLOBAL_MOUSE
@@ -628,6 +631,14 @@ bool CInput::iSetMousePos(const Ivector2& p, bool global /*= false*/) const
 
 void CInput::GrabInput(const bool grab)
 {
+    // -agent_background: keep the logical grab state the game relies on, but
+    // never touch the user's real cursor (no hide, window grab, relative mode).
+    if (AgentBackgroundMode())
+    {
+        inputGrabbed = grab;
+        return;
+    }
+
     // Self descriptive
     ShowCursor(!grab);
 

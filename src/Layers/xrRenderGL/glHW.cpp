@@ -6,6 +6,7 @@
 
 #include "glHW.h"
 #include "xrEngine/XR_IOConsole.h"
+#include "xrEngine/AgentBridge.h"
 
 #ifdef XR_PLATFORM_APPLE
 #include <SDL_syswm.h>
@@ -64,7 +65,9 @@ CHW::~CHW()
 
 void CHW::OnAppActivate()
 {
-    if (m_window)
+    // SDL restores with ShowWindow(SW_RESTORE), which activates the window:
+    // background instances must never take focus (and are never minimized).
+    if (m_window && !AgentBackgroundMode())
     {
         SDL_RestoreWindow(m_window);
     }
