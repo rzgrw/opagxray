@@ -121,8 +121,9 @@ void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
     VERIFY((*I).second->m_group_id == ID);
     (*I).second->m_group_id = 0xffff;
 
-    // Squad members should not be in the graph vertex registry; log the
-    // state that leads to a duplicate add in graph.update below.
+    // Squad members should not be in the graph vertex registry (see
+    // CALifeUpdateManager::teleport_object); log it if one is, because
+    // graph.update below would then add it a second time.
     CSE_ALifeDynamicObject* object = (*I).second;
     if (!object->m_bOnline && object->used_ai_locations() &&
         ai().game_graph().valid_vertex_id(object->m_tGraphID) &&

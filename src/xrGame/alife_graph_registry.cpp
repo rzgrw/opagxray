@@ -181,9 +181,12 @@ void CALifeGraphRegistry::add(CSE_ALifeDynamicObject* object, GameGraph::_GRAPH_
     if (!object->m_bOnline && object->used_ai_locations() /**&& object->interactive()**/)
     {
         VERIFY(ai().game_graph().valid_vertex_id(game_vertex_id));
-        // no_assert=true: duplicate entry is logged and skipped instead of fatal;
-        // observed via CoC squad unregister_member (cause unconfirmed, see the
-        // diagnostic in CSE_ALifeOnlineOfflineGroup::unregister_member).
+        // no_assert=true: duplicate entry is logged and skipped instead of fatal.
+        // Known cause (fixed in CALifeUpdateManager::teleport_object): CoC's
+        // TeleportSquad moved squad members into the vertex registry, so the
+        // add in CSE_ALifeOnlineOfflineGroup::unregister_member hit a duplicate.
+        // Kept as a defensive guard; seeing this message means another path
+        // put an object at its vertex twice.
         if (m_objects[game_vertex_id].objects().objects().count(object->ID))
             Msg("! ALife: object [%d] already at graph vertex [%d] during add", object->ID, game_vertex_id);
         m_objects[game_vertex_id].objects().add(object->ID, object, true);
