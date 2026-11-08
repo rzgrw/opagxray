@@ -442,6 +442,15 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
                     static_cast<int>(psDeviceMode.Height) == event.window.data2)
                     break; // we don't need to reset device if resolution wasn't really changed
 
+                // UpdateWindowProps scaled the window down to fit the display.
+                // Rendering stays at the requested mode (Present scales it into
+                // the drawable); adopting this size would replace the user's
+                // mode with the scaled one, reset again and save it.
+                if (m_scaledWindowSize.x == event.window.data1 &&
+                    m_scaledWindowSize.y == event.window.data2)
+                    break;
+
+                m_scaledWindowSize = {};
                 psDeviceMode.Width = event.window.data1;
                 psDeviceMode.Height = event.window.data2;
 
