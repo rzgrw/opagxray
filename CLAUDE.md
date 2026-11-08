@@ -4,13 +4,13 @@
 
 Open Agentic XRay is a **detached fork** of OpenXRay (X-Ray Engine for S.T.A.L.K.E.R.) being rebuilt with AI coding agents. The repository is [rzgrw/opagxray](https://github.com/rzgrw/opagxray) and is no longer in OpenXRay's GitHub fork network. OpenXRay (and IXRay) are **inspiration and foundation, not scripture**: there is no PR flow upstream; selective, reviewed intake of upstream fixes stays allowed with license notices preserved. Current execution status: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md); the older roadmap retains the long-term vision.
 
-- **Branches:** `main` is stable (`f73d2d029` as of 2026-11-08; GitHub default) and moves only by fast-forward from `dev` after a recorded gate; `dev` is experimental integration. Feature work goes on short-lived branches that are merged then deleted, or archived as `archive/<name>` tags (`git fetch origin tag archive/<name>`, then `git switch -c <x> archive/<name>`). The `dev` README is the live one and becomes the `main` README on each fast-forward; between gates only descriptive `main` README sections may change, via a docs-only commit on `main` merged back into `dev` (keep the dev README) so fast-forward stays possible. Commit/push only when asked.
-- **Platform:** development is moving from macOS to **Windows 11**. Mac results are historical Mac evidence; the Windows build, bridge, and runtime are not yet verified — start from [docs/windows-dev-setup.md](docs/windows-dev-setup.md) and [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md).
+- **Branches:** `main` is stable (GitHub default; last fast-forwarded to `dev` on 2026-11-08 by user request, see PLAN_STATUS) and moves only by fast-forward from `dev` after a recorded gate; `dev` is experimental integration. Feature work goes on short-lived branches that are merged then deleted, or archived as `archive/<name>` tags (`git fetch origin tag archive/<name>`, then `git switch -c <x> archive/<name>`). The `dev` README is the live one and becomes the `main` README on each fast-forward; between gates only descriptive `main` README sections may change, via a docs-only commit on `main` merged back into `dev` (keep the dev README) so fast-forward stays possible. Commit/push only when asked.
+- **Platform:** development has moved from macOS to **Windows 11**. MSBuild x64 Release builds and runs CoC 1.4.22 on GL; Mac results are historical. Start from [docs/windows-dev-setup.md](docs/windows-dev-setup.md).
 
 - **Runtime:** OpenGL is the working baseline and **stability and frame-time consistency are the current priority**. Native-renderer work is paused: Metal M-R0/menu shipped, M-R1 parked at `caa2e4953` (tag `archive/feat/metal-mr1-ingame`), Vulkan not started. Long-term direction remains Metal on macOS / Vulkan on Linux and Windows.
 - **AI:** xrSim foundation, HTTP transport, thin actor harness, session packs, and async actor wakes are shipped. Gate 1 Task 1 canonical state is integrated at `04b4ef5b5`; further AI expansion follows the runtime comparison. Gate 1 is not complete. See the inventory before restarting old plans.
-- **Agent bridge (shipped, POSIX only):** launch with `-agent_bridge`, drive via `tools/agentctl.py` — Claude can run, control, and screenshot the game itself. This is the standard verification harness on macOS/Linux; the Windows branch of `AgentBridge.cpp` is a stub (Unix socket only), so a Windows control transport is open work.
-- **Frame-time telemetry (shipped, opt-in):** `FrameTimeCollector`/`FrameTimeSession`, bridge verbs `perf.start/stop/reset/status/export`, `tools/frame_time_report.py`, and `tools/frame_time_provenance.py` sidecars. Measurement infrastructure only — no performance gain has been measured. Export returns `export_unavailable` on Windows.
+- **Agent bridge (shipped, Windows + POSIX):** launch with `-agent_bridge`, drive via `tools/agentctl.py` — Claude can run, control, and screenshot the game itself. Windows uses TCP on 127.0.0.1 (`-agent_bridge_port`, port written to `<appdata>/agent_bridge.port`); POSIX uses a Unix socket. Run test instances with `-agent_background` (no focus, off-screen, no audio) and a separate appdata each.
+- **Frame-time telemetry (shipped, opt-in):** `FrameTimeCollector`/`FrameTimeSession`, bridge verbs `perf.start/stop/reset/status/export`, `tools/frame_time_report.py`, and `tools/frame_time_provenance.py` sidecars. Measurement infrastructure only — no performance gain has been measured. Export works on Windows and POSIX.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ tools/                       # agentctl.py + bridge soak/acceptance scripts
 
 ## Build (Windows)
 
-Unverified — no one has built current `dev` on Windows yet. Toolchain, submodules, recommended CMake+Ninja route, assets and bridge gaps: [docs/windows-dev-setup.md](docs/windows-dev-setup.md). The `src/engine.sln` MSBuild route lacks this fork's CMake-only sources. Never mix stock CoC `bin/` DLLs with repo-built modules.
+Verified route: `nuget restore src\engine.sln`, then MSBuild x64 Release (from Claude Code's shell: `env -u NoDefaultCurrentDirectoryInExePath MSBuild.exe ...`). Output `bin\x64\Release\xrEngine.exe`. New sources go into both CMake and the `.vcxproj`. CMake+Ninja on Windows is unverified. Details: [docs/windows-dev-setup.md](docs/windows-dev-setup.md). Never mix stock CoC `bin/` DLLs with repo-built modules.
 
 ## Build (macOS)
 
@@ -62,7 +62,7 @@ On macOS Tahoe beta, also pass: `-DCMAKE_OSX_SYSROOT=/Library/Developer/CommandL
 
 ## Testing — use the agent bridge
 
-Bridge-driven testing currently works only on macOS/Linux (see above). Use the exact primary IXRay CoC 1.4.12 + 1.4.22 archives and target GL overlay, with separate private user/test appdata and explicit paths from [macOS setup](docs/macos-dev-setup.md). Do not use the historical Downloads runtime default or assume save `1`. Launch with `-agent_bridge`, then:
+Bridge-driven testing works on Windows (TCP) and macOS/Linux (Unix socket); see the README and windows-dev-setup for the multi-instance launch. Use the exact primary IXRay CoC 1.4.12 + 1.4.22 archives and target GL overlay, with separate private user/test appdata and explicit paths from [macOS setup](docs/macos-dev-setup.md). Do not use the historical Downloads runtime default or assume save `1`. Launch with `-agent_bridge`, then:
 
 ```bash
 python3 tools/agentctl.py <private-runtime>/appdata/agent_bridge.sock state

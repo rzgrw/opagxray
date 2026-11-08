@@ -1,5 +1,9 @@
 # Plan status — 2026-11-08
 
+## main promotion — 2026-11-08
+
+At the user's explicit request `main` was fast-forwarded to `dev` **without the full recorded gate**. Evidence at promotion: MSBuild x64 Release built clean (last full rebuild at `9735397d1`; later merges were docs and the script key table); the staged CoC 1.4.22 runtime reached the main menu on GL through the README's `-fsltx` launch (background instance, screenshot checked); the Windows bridge and `-agent_background` passed their menu-scene two-instance test. Not yet verified in game: crash fixes `482a142de`, `215ec351a`, `d85e8208e`, the PgUp/PgDn swap, and long soaks. The next gate must cover them before the following promotion.
+
 ## Windows transfer — 2026-11-07
 
 Current execution is moving to Windows. Read [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md) before resuming: it records the reviewed menu repair, final Mac runtime results, WIP provenance/overhead branches, Windows bridge/export/build gaps and transfer recovery instructions. Historical checklist and benchmark claims remain subject to their original platform/evidence limits. Build, test, and live results below are macOS runs unless a 2026-11-08 section names a Windows command. The full engine has still not been built on Windows. The standalone `xrSimCore` tests in the Gate 1 recovery section are the exception.

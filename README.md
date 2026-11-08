@@ -105,23 +105,66 @@ cmake --build build -j10
 
 Binaries go to `bin/arm64/Release/` (not `build/bin/`). On macOS Tahoe beta add `-DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk` and use an explicit `-j10` (`sysctl -n hw.ncpu` has trailing whitespace there). Details: [docs/macos-dev-setup.md](docs/macos-dev-setup.md).
 
-## Run With Game Data
+## Play Call of Chernobyl
 
-You need original game files or a legal standalone mod install. Stage a private runtime from a CoC install instead of running inside it:
+The repository contains only the engine. Game content comes from **Call of Chernobyl (CoC)**, a free standalone S.T.A.L.K.E.R. mod by Team EPIC. There are no prebuilt binaries yet, so build the engine first ([Windows](#build-on-windows) or [macOS](#build-on-macos)).
 
-```bash
-py tools/stage_coc_runtime.py --base <coc-1.4.12> --patch <coc-1.4.22> --output build/runtime/coc
+### 1. Get the CoC asset packs
+
+Download both from the mod's ModDB page, [moddb.com/mods/call-of-chernobyl](https://www.moddb.com/mods/call-of-chernobyl) (Downloads section), and follow the mod's own terms:
+
+| Pack | What it is | Extract to (example) |
+|---|---|---|
+| **Call of Chernobyl 1.4** full install (build 1.4.12) | the base game content | `C:\Games\CoC-1.4.12` |
+| **Call of Chernobyl 1.4.22** patch | the latest 1.4 patch | `C:\Games\CoC-1.4.22` |
+
+Extract each into its own folder and keep both folders unchanged. Each one has a `database\` directory of `.db` archives. The patch folder must contain `database\config\scripts.db` and `database\config\configs.db`. Never run CoC's own `bin\` folder: its DirectX-era engine DLLs must not be mixed with the modules built from this repository.
+
+Already have a single CoC install with 1.4.22 applied? Pass that one folder as both `--base` and `--patch` below. That plays fine, but such a runtime is not valid for performance measurements.
+
+### 2. Stage a private runtime
+
+The stager copies the `.db` archives (about 8 GB) into a runtime folder of your own, adds this repository's OpenGL shaders and writes `fsgame.ltx`. Saves, logs, screenshots and settings then live in that runtime's `appdata\`, never in the CoC download folders.
+
+```powershell
+py tools\stage_coc_runtime.py --base C:\Games\CoC-1.4.12 --patch C:\Games\CoC-1.4.22 --output build\runtime\coc
 ```
 
-The stager copies only the database archives and generates `fsgame.ltx`; runtime-written config and appdata belong to the staged runtime. On Windows set `renderer renderer_rgl` in `build/runtime/coc/appdata/user.ltx` (the default `renderer_r3` selects DX11). Launch:
+Needs Python 3.11 or newer. Run it again after a CoC update; it keeps your saves and settings.
 
-```bash
-bin/x64/Release/xrEngine.exe -fsltx "<runtime>\fsgame.ltx"
+### 3. Select the OpenGL renderer (Windows)
+
+Open `build\runtime\coc\appdata\user.ltx` and change the first line from `renderer renderer_r3` to:
+
+```text
+renderer renderer_rgl
 ```
 
-To start straight into a save: add `-start 'server(<save>/single/alife/load)' 'client(localhost)'`. Use your own named saves for tests; never assume save `1`.
+On Windows `renderer_r3` loads the legacy DX11 renderer; OpenGL is the supported one. macOS always uses OpenGL.
 
-To inspect CoC scripts or configs: `python -I tools/xrdb_unpack.py <coc>/database/config/scripts.db <empty-dir> [scripts/]`.
+### 4. Start the game
+
+From the repository root:
+
+```powershell
+# Windows: pass the full path to the staged fsgame.ltx
+bin\x64\Release\xrEngine.exe -fsltx C:\path\to\opagxray\build\runtime\coc\fsgame.ltx
+```
+
+```bash
+# macOS: run from inside the runtime folder
+REPO="$PWD"; cd build/runtime/coc && "$REPO/bin/arm64/Release/xr_3da"
+```
+
+The main menu shows **Call of Chernobyl ver. 1.4.22**. Pick *New game*, then choose a faction and a starting location. Useful options:
+
+- `-nointro` skips the intro videos.
+- `-start 'server(<save>/single/alife/load)' 'client(localhost)'` loads a save directly. Use your own named saves.
+- The staged `user.ltx` starts 1280x720 windowed with volume muted; change both in *Options*.
+
+If something goes wrong, check `build\runtime\coc\appdata\logs\` and attach that log to the crash report.
+
+To read CoC scripts or configs: `python -I tools/xrdb_unpack.py <coc>/database/config/scripts.db <empty-dir> [scripts/]`.
 
 ## Agent Bridge
 
@@ -255,6 +298,7 @@ docs/
 
 ## Important Docs
 
+- [Play Call of Chernobyl](#play-call-of-chernobyl): asset packs, staging and launch, step by step.
 - [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md): current inventory, shipped refs, open acceptance. Read first.
 - [docs/windows-dev-setup.md](docs/windows-dev-setup.md): Windows toolchain, build, bridge, background instances, known issues.
 - [docs/COC_SCRIPT_API_COMPAT_2026-11-08.md](docs/COC_SCRIPT_API_COMPAT_2026-11-08.md): CoC script vs engine API audit.
