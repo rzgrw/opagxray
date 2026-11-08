@@ -12,6 +12,8 @@ Let a coding agent load into the game, control the player character, and observe
 
 New `xrEngine` subsystem `CAgentBridge`, active only when the engine is launched with `-agent_bridge [socket_path]`. Default socket: `$app_data_root$/agent_bridge.sock` (Unix domain socket — native POSIX idiom, faster than TCP loopback, filesystem-permission scoped).
 
+**Windows transport (2026-11-08).** Windows Python lacks `AF_UNIX`, so the Windows engine binds TCP on `127.0.0.1` only. The port comes from `-agent_bridge_port <n>`, or the OS picks one, and is published atomically to `$app_data_root$/agent_bridge.port`. A bind failure disables the bridge with a log line instead of asserting. The protocol, queues and threading are shared code; only a small socket shim differs. `-agent_background` runs an instance unobtrusively (no focus, off-screen, muted). See `docs/windows-dev-setup.md`.
+
 **Threading model.** A dedicated bridge thread owns the socket: accepts one client at a time, reads newline-delimited requests, writes responses. Parsed requests go into a mutex-guarded queue; `CRenderDevice`'s frame loop drains the queue **once per frame on the main thread** (console, Lua, and SDL input are main-thread-only). Command latency = one frame (~16 ms). Responses carry request IDs so the client may pipeline.
 
 **Lifecycle.** Socket file unlinked at startup (stale-proof) and shutdown. Bridge thread join is bounded (≤2 s) per the engine's teardown hardening rules; an unresponsive bridge thread is detached with a log line, never a hang. Zero footprint when the flag is absent.
