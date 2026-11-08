@@ -14,6 +14,7 @@
 #include "alife_schedule_registry.h"
 #include "alife_spawn_registry.h"
 #include "alife_object_registry.h"
+#include "alife_group_registry.h"
 #include "ef_storage.h"
 #include "xrServer.h"
 #include "Level.h"
@@ -396,12 +397,44 @@ void CALifeUpdateManager::teleport_object(
     }
 #endif
 
+    CSE_ALifeMonsterAbstract* monster_abstract = smart_cast<CSE_ALifeMonsterAbstract*>(object);
+
+    // A squad member is deliberately absent from the graph vertex, level and
+    // schedule registries: register_member() removes it and the group stands
+    // in for it until unregister_member() re-adds it via graph().update().
+    // graph().change() on a member would miss the remove and then insert the
+    // member at the new vertex, so the later unregister_member() add hits a
+    // duplicate ("already found in the registry"), or leaves a dangling entry
+    // if the group moved meanwhile. CoC's TeleportSquad (_g.script) teleports
+    // the squad and then every member, so only update the member's location.
+    if (monster_abstract && monster_abstract->m_group_id != 0xffff)
+    {
+        if (object->m_bOnline)
+        {
+            // Members go offline with their group, never on their own.
+            CSE_ALifeOnlineOfflineGroup& group = groups().object(monster_abstract->m_group_id);
+            if (group.m_bOnline)
+                switch_offline(&group);
+        }
+
+        if (!object->m_bOnline)
+        {
+            object->m_tGraphID = game_vertex_id;
+            object->m_tNodeID = level_vertex_id;
+            object->o_Position = position;
+            monster_abstract->m_tNextGraphID = game_vertex_id;
+            return;
+        }
+
+        Msg("! ALife: squad member [%d] is online while its squad [%d] is offline; teleporting it alone", object->ID,
+            monster_abstract->m_group_id);
+    }
+
     if (object->m_bOnline)
         switch_offline(object);
     graph().change(object, object->m_tGraphID, game_vertex_id);
     object->m_tNodeID = level_vertex_id;
     object->o_Position = position;
-    CSE_ALifeMonsterAbstract* monster_abstract = smart_cast<CSE_ALifeMonsterAbstract*>(object);
     if (monster_abstract)
         monster_abstract->m_tNextGraphID = object->m_tGraphID;
 }
