@@ -197,10 +197,17 @@ void SettleReply(const PendingRequest& request, const ActorWakePollResult& polle
     FreeplayLedgerEntry entry = DecisionEntry(request.ownerId, request.stored, "live");
     entry.provider = result.provider;
     entry.model = result.model;
-    if (!polled.ok || !result.ok)
+    // A coast with a reason comes from the provider (disabled, transport, HTTP), not from the model:
+    // it is a provider failure. Only a reasonless coast is the model choosing to keep its objective.
+    if (!polled.ok || !result.ok || !result.coastReason.empty())
     {
         entry.source = "hold";
-        entry.verdict = !polled.ok ? polled.reason : (result.error.empty() ? "provider_error" : result.error);
+        if (!polled.ok)
+            entry.verdict = polled.reason;
+        else if (!result.ok)
+            entry.verdict = result.error.empty() ? "provider_error" : result.error;
+        else
+            entry.verdict = result.error.empty() ? result.coastReason : result.coastReason + ":" + result.error;
         g_freeplay.ledger.Append(entry);
         g_freeplay.scheduler.OnDecision(request.ownerId, true, g_freeplay.nowMs);
         return;

@@ -962,14 +962,40 @@ void StartFreeplay(const char* mode)
     RequireSetup(xrSim::FreeplayResult{RequireVerb("ai.freeplay.sync", kTwoGroups) == "owners=3", "owners=3"});
 }
 
-void StartLive(const std::vector<std::string>& script)
+void StartLiveWith(std::unique_ptr<xrSim::IActorIntentProvider> provider, const std::string& snapshot)
 {
     RequireVerb("ai.reset");
-    xrSim::SetFreeplayProviderForTests(std::make_unique<xrSim::RecordedActorIntentProvider>(script));
+    xrSim::SetFreeplayProviderForTests(std::move(provider));
     RequireVerb("ai.freeplay.mode", "live");
     RequireVerb("ai.freeplay.begin");
-    RequireSetup(xrSim::FreeplayResult{RequireVerb("ai.freeplay.sync", kTwoGroups) == "owners=3", "owners=3"});
+    RequireSetup(xrSim::FreeplayResult{RequireVerb("ai.freeplay.sync", snapshot).rfind("owners=", 0) == 0, "sync"});
 }
+
+void StartLive(const std::vector<std::string>& script)
+{
+    StartLiveWith(std::make_unique<xrSim::RecordedActorIntentProvider>(script), kTwoGroups);
+}
+
+// Answers every wake with a coast; a non-empty reason marks it as provider-originated.
+class CoastProvider final : public xrSim::IActorIntentProvider
+{
+public:
+    explicit CoastProvider(const char* reason) : m_reason(reason) {}
+    xrSim::ActorProviderResult Wake(const xrSim::ActorWakeContext&) override
+    {
+        xrSim::ActorProviderResult result;
+        result.ok = true;
+        result.coast = true;
+        result.plan.coast = true;
+        result.coastReason = m_reason;
+        result.provider = "test-coast";
+        result.model = "fixture";
+        return result;
+    }
+
+private:
+    std::string m_reason;
+};
 
 // Ticks at nowMs until the ledger contains needle; returns every tick line seen.
 std::string TickUntilLogged(const std::string& needle, uint64_t nowMs)
@@ -1096,6 +1122,39 @@ bool TestProviderErrorHolds()
         "objective and revision unchanged") && ok;
     return Expect(Contains(RequireVerb("ai.freeplay.log"), "verdict=recorded_actor_provider_exhausted"),
                "provider error is the verdict") && ok;
+}
+
+// Five squads: tick 0 hands out owners 1 and 2; owner 1 observes at 1 and its reply drains at 1.
+std::string CoastAfterObserve(const char* reason, const char* needle)
+{
+    StartLiveWith(std::make_unique<CoastProvider>(reason), FiveSquads());
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.tick", "1");
+    RequireVerb("ai.freeplay.observe", ObservationFor(1, 1, 1, 0));
+    return TickUntilLogged(needle, 1);
+}
+
+bool TestProviderCoastHoldsAndBacksOff()
+{
+    const std::string ticks = CoastAfterObserve("transport_error", "source=hold");
+    const std::string log = RequireVerb("ai.freeplay.log");
+    bool ok = Expect(Contains(log, "source=hold verdict=transport_error "), ("provider coast is a hold: " + log).c_str());
+    ok = Expect(!Contains(log, "verdict=kept"), "provider coast is not kept") && ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=hold:- source=none rev=0"), "objective and revision unchanged") && ok;
+    ok = Expect(!Contains(ticks, "observe ") && !Contains(RequireVerb("ai.freeplay.tick", "1"), "observe "),
+        "backoff hands out nothing at the same time") && ok;
+    return Expect(Contains(RequireVerb("ai.freeplay.tick", "30001"), "observe 3 "),
+               "owners handed out again once the 30000 ms backoff ends") && ok;
+}
+
+bool TestModelCoastIsKept()
+{
+    const std::string ticks = CoastAfterObserve("", "verdict=kept");
+    const std::string log = RequireVerb("ai.freeplay.log");
+    bool ok = Expect(Contains(log, "source=live verdict=kept "), ("model coast is kept: " + log).c_str());
+    ok = Expect(!Contains(log, "source=hold"), "model coast is not a hold") && ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=hold:- source=none rev=0"), "objective unchanged") && ok;
+    return Expect(Contains(ticks, "observe 3 "), ("no backoff: next owner handed out at once: " + ticks).c_str()) && ok;
 }
 
 bool TestLiveModeRefusedWithoutProvider()
@@ -1228,6 +1287,8 @@ int main()
     ok = TestReplyAfterBeginWorldIsStale() && ok;
     ok = TestStaleReplyAfterSplit() && ok;
     ok = TestProviderErrorHolds() && ok;
+    ok = TestProviderCoastHoldsAndBacksOff() && ok;
+    ok = TestModelCoastIsKept() && ok;
     ok = TestLiveModeRefusedWithoutProvider() && ok;
     ok = TestBlockedEventRewakesOwner() && ok;
     ok = TestModeOffEmitsNothing() && ok;
