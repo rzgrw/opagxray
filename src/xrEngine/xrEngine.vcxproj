@@ -121,6 +121,7 @@
     <ClInclude Include="xrSim\xrSimAnthropicTransport.h" />
     <ClInclude Include="xrSim\xrSimBridge.h" />
     <ClInclude Include="xrSim\xrSimFreeplay.h" />
+    <ClInclude Include="xrSim\xrSimFreeplayDecision.h" />
     <ClInclude Include="xrSim\xrSimNullAgent.h" />
     <ClInclude Include="xrSim\xrSimPackSpawn.h" />
     <ClInclude Include="xrSim\xrSimWorldState.h" />
@@ -241,6 +242,9 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="xrSim\xrSimFreeplay.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="xrSim\xrSimFreeplayDecision.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="xrSim\xrSimNullAgent.cpp">

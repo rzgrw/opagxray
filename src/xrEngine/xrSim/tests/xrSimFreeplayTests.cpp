@@ -1,5 +1,7 @@
 #include "xrSim/xrSimFreeplay.h"
+#include "xrSim/xrSimFreeplayDecision.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -379,6 +381,318 @@ bool TestObjectiveAndMemoryValidation()
             std::string(xrSim::FreeplaySourceName(xrSim::FreeplayObjectiveSource::Inherited)) == "inherited",
         "writer and source names") && ok;
 }
+
+const char* kSquadObservation =
+    "xrsim_freeplay_observation_v1\n"
+    "owner 1 1\n"
+    "situation quiet\n"
+    "site esc_smart_a 0 base 2\n"
+    "site esc_smart_b 120 camp 0\n"
+    "site esc_smart_c 340 anomaly_field 1\n"
+    "sighting esc_dogs mutant monster_predatory_day 1 80 enemy\n"
+    "end\n";
+
+std::string ObservationFor(uint64_t ownerId, uint32_t revision, size_t sites, size_t sightings)
+{
+    std::string text = "xrsim_freeplay_observation_v1\nowner " + std::to_string(ownerId) + " " +
+        std::to_string(revision) + "\nsituation quiet\n";
+    for (size_t i = 0; i < sites; ++i)
+        text += "site esc_smart_" + std::to_string(i) + " " + std::to_string(10 * i) + " camp 0\n";
+    for (size_t i = 0; i < sightings; ++i)
+        text += "sighting dogs_" + std::to_string(i) + " mutant monster 2 50 enemy\n";
+    return text + "end\n";
+}
+
+xrSim::FreeplayObservation RequireObservation(const xrSim::FreeplayPopulation& population, const std::string& text)
+{
+    const xrSim::FreeplayObservationParse parsed = xrSim::ParseFreeplayObservation(population, text);
+    if (!Expect(parsed.ok, ("test setup: observation parses: " + parsed.reason).c_str()))
+        std::exit(EXIT_FAILURE);
+    return parsed.observation;
+}
+
+xrSim::ActorIntentPlan PlanOf(const std::vector<std::pair<const char*, const char*>>& actions)
+{
+    xrSim::ActorIntentPlan plan;
+    for (const auto& item : actions)
+    {
+        xrSim::ActorAction action;
+        action.verb = item.first;
+        action.target = item.second;
+        plan.actions.push_back(action);
+    }
+    return plan;
+}
+
+bool HasReason(const xrSim::FreeplayVerdict& verdict, const char* reason)
+{
+    return !verdict.ok && verdict.reason == reason;
+}
+
+bool TestObservationParseAndLimits()
+{
+    xrSim::FreeplayPopulation population;
+    population.BeginWorld();
+    RequireSetup(population.Sync(kTwoGroups));
+    const xrSim::FreeplayObservationParse parsed = xrSim::ParseFreeplayObservation(population, kSquadObservation);
+    if (!Expect(parsed.ok, ("valid observation parses: " + parsed.reason).c_str()))
+        return false;
+    const xrSim::FreeplayObservation& observation = parsed.observation;
+    bool ok = Expect(observation.ownerId == 1 && observation.membershipRevision == 1 && observation.epoch == 1,
+        "observation stamps owner, revision and epoch");
+    ok = Expect(observation.situation == "quiet", "observation situation") && ok;
+    ok = Expect(observation.sites.size() == 3 && observation.sites[2].name == "esc_smart_c" &&
+            observation.sites[2].distanceMeters == 340 && observation.sites[2].kind == "anomaly_field" &&
+            observation.sites[2].occupants == 1,
+        "observation sites") && ok;
+    ok = Expect(observation.sightings.size() == 1 && observation.sightings[0].name == "esc_dogs" &&
+            observation.sightings[0].species == "mutant" &&
+            observation.sightings[0].faction == "monster_predatory_day" && observation.sightings[0].count == 1 &&
+            observation.sightings[0].distanceMeters == 80 && observation.sightings[0].relation == "enemy",
+        "observation sightings") && ok;
+
+    std::string joined = kSquadObservation;
+    for (char& c : joined)
+        if (c == '\n')
+            c = ';';
+    ok = Expect(xrSim::ParseFreeplayObservation(population, joined).ok, "semicolon separated observation parses") &&
+        ok;
+    ok = Expect(xrSim::ParseFreeplayObservation(population, ObservationFor(1, 1, 8, 6)).ok,
+        "eight sites and six sightings parse") && ok;
+
+    const std::vector<std::pair<std::string, const char*>> invalid{
+        {ObservationFor(1, 1, 9, 0), "too_many_sites"},
+        {ObservationFor(1, 1, 0, 7), "too_many_sightings"},
+        {ObservationFor(1, 2, 1, 0), "stale_membership"},
+        {ObservationFor(99, 1, 1, 0), "unknown_owner"},
+        {"xrsim_freeplay_observation_v2\nowner 1 1\nsituation quiet\nend\n", "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\n", "malformed"},
+        {"xrsim_freeplay_observation_v1\nsituation quiet\nend\n", "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nend\n", "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsite a 1x camp 0\nend\n", "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsite a 1 camp\nend\n", "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsighting a robot f 1 2 enemy\nend\n",
+            "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsighting a mutant f 1 2 hungry\nend\n",
+            "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsquad 1\nend\n", "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nend\nsite a 1 camp 0\n", "malformed"},
+    };
+    for (const auto& item : invalid)
+    {
+        const xrSim::FreeplayObservationParse result = xrSim::ParseFreeplayObservation(population, item.first);
+        ok = Expect(!result.ok && result.reason == item.second,
+            ("observation rejected with " + std::string(item.second) + ", got " + result.reason).c_str()) && ok;
+    }
+    return ok;
+}
+
+bool TestWakePromptListsSitesAndRules()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    RequireSetup(population.AddMemory(1, "ambushed_at_bridge"));
+    const xrSim::FreeplayObservation observation = RequireObservation(population, kSquadObservation);
+    const xrSim::FreeplayOwner& squad = RequireGroup(population, 500);
+    const xrSim::ActorWakeContext context = xrSim::BuildFreeplayWake(squad, observation, "membership_changed");
+    const std::string& prompt = context.prompt;
+    bool ok = Expect(prompt.rfind("xrsim_freeplay_wake_v1\n", 0) == 0, "prompt starts with the wake header");
+    for (const xrSim::FreeplaySite& site : observation.sites)
+        ok = Expect(prompt.find("site " + site.name + " ") != std::string::npos, "prompt lists every site") && ok;
+    ok = Expect(prompt.find("sighting esc_dogs mutant monster_predatory_day 1 80 enemy\n") != std::string::npos,
+        "prompt lists every sighting") && ok;
+    const char* expectedLines[] = {"kind squad\n", "faction stalker\n", "level l01_escape\n", "members 2\n",
+        "current_site esc_smart_a\n", "objective move_to esc_smart_b source bootstrap\n",
+        "memory ambushed_at_bridge\n", "wake_reasons membership_changed\n",
+        "legal_tools stay move_to retreat author_memory\n", "response_record action stay\n",
+        "response_record action move_to <site_name>\n", "response_record action retreat <site_name>\n",
+        "site_name_must_be_listed\n", "response_first_line xrsim_actor_intent_v1\n", "response_alternative coast\n"};
+    for (const char* line : expectedLines)
+        ok = Expect(prompt.find(line) != std::string::npos, (std::string("prompt line ") + line).c_str()) && ok;
+    ok = Expect(prompt.find("adjust_population") == std::string::npos &&
+            prompt.find("<legal_tool>") == std::string::npos,
+        "prompt drops the actor tool lines") && ok;
+    ok = Expect(context.actor.agentId == 1 && context.actor.scope == xrSim::ActorAgentScope::Squad &&
+            context.actor.name == "esc_stalkers",
+        "wake actor record") && ok;
+    ok = Expect(!context.observation.empty() && prompt.find(context.observation) != std::string::npos,
+        "prompt embeds the observation") && ok;
+    const xrSim::FreeplayOwner* dogs = population.OwnerOfNpc(611);
+    const xrSim::ActorWakeContext dogWake = xrSim::BuildFreeplayWake(*dogs, observation, "timer");
+    return Expect(dogWake.actor.scope == xrSim::ActorAgentScope::MutantPack, "mutant owners wake as packs") && ok;
+}
+
+bool TestDecisionAcceptsListedSite()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    const xrSim::FreeplayObservation observation = RequireObservation(population, kSquadObservation);
+    xrSim::ActorIntentPlan plan = PlanOf({{"move_to", "esc_smart_c"}, {"author_memory", "saw_dogs"}});
+    plan.memories.push_back("dogs_near_bridge");
+    const xrSim::FreeplayVerdict verdict = xrSim::ValidateFreeplayDecision(population, observation, plan);
+    bool ok = Expect(verdict.ok && !verdict.keep && verdict.verb == "move_to" && verdict.site == "esc_smart_c",
+        ("move_to listed site accepted: " + verdict.reason).c_str());
+    ok = Expect(verdict.memories == std::vector<std::string>{"dogs_near_bridge"}, "verdict carries plan memories") &&
+        ok;
+
+    const xrSim::ActorIntentParseResult stay =
+        xrSim::ParseActorIntentPlan("xrsim_actor_intent_v1\naction stay\nmemory quiet_night\nend\n");
+    ok = Expect(stay.ok, ("model text with action stay parses: " + stay.reason).c_str()) && ok;
+    const xrSim::FreeplayVerdict stayed = xrSim::ValidateFreeplayDecision(population, observation, stay.plan);
+    ok = Expect(stayed.ok && stayed.verb == "stay" && stayed.site == "esc_smart_a" &&
+            stayed.memories == std::vector<std::string>{"quiet_night"},
+        ("parsed stay uses the owner site: " + stayed.reason).c_str()) && ok;
+
+    const xrSim::ActorIntentParseResult move =
+        xrSim::ParseActorIntentPlan("xrsim_actor_intent_v1\ngoal scout\naction move_to esc_smart_b\nend\n");
+    ok = Expect(move.ok, ("model text with action move_to parses: " + move.reason).c_str()) && ok;
+    const xrSim::FreeplayVerdict moved = xrSim::ValidateFreeplayDecision(population, observation, move.plan);
+    ok = Expect(moved.ok && moved.verb == "move_to" && moved.site == "esc_smart_b",
+        ("parsed move_to accepted: " + moved.reason).c_str()) && ok;
+
+    const xrSim::FreeplayVerdict retreat =
+        xrSim::ValidateFreeplayDecision(population, observation, PlanOf({{"retreat", "esc_smart_b"}}));
+    return Expect(retreat.ok && retreat.verb == "retreat" && retreat.site == "esc_smart_b",
+               ("retreat to listed site accepted: " + retreat.reason).c_str()) && ok;
+}
+
+bool TestDecisionRejections()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    const xrSim::FreeplayObservation observation = RequireObservation(population, kSquadObservation);
+    const xrSim::ActorIntentPlan move = PlanOf({{"move_to", "esc_smart_c"}});
+
+    xrSim::FreeplayObservation unknown = observation;
+    unknown.ownerId = 99;
+    bool ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, unknown, move), "unknown_owner"),
+        "unknown_owner");
+    xrSim::FreeplayObservation oldWorld = observation;
+    oldWorld.epoch = population.Epoch() + 1;
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, oldWorld, move), "stale_world"),
+        "stale_world") && ok;
+    xrSim::FreeplayObservation oldMembers = observation;
+    oldMembers.membershipRevision = 7;
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, oldMembers, move), "stale_membership"),
+        "stale_membership") && ok;
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, observation,
+                              PlanOf({{"move_to", "esc_smart_c"}, {"fire_pattern", "x"}})),
+                    "illegal_tool"),
+        "illegal_tool") && ok;
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, observation,
+                              PlanOf({{"author_memory", "saw_dogs"}})),
+                    "need_one_objective"),
+        "need_one_objective with no movement verb") && ok;
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, observation,
+                              PlanOf({{"stay", ""}, {"move_to", "esc_smart_c"}})),
+                    "need_one_objective"),
+        "need_one_objective with two movement verbs") && ok;
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, observation,
+                              PlanOf({{"move_to", "esc_smart_z"}})),
+                    "unknown_site"),
+        "unknown_site for move_to") && ok;
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, observation, PlanOf({{"retreat", ""}})),
+                    "unknown_site"),
+        "unknown_site for retreat without target") && ok;
+
+    const xrSim::FreeplayObservation dogs =
+        RequireObservation(population, "xrsim_freeplay_observation_v1\nowner 2 1\nsituation quiet\nend\n");
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, dogs, PlanOf({{"stay", ""}})), "no_site"),
+        "no_site") && ok;
+    const xrSim::FreeplayObservation trader =
+        RequireObservation(population, ObservationFor(3, 1, 3, 0));
+    return Expect(HasReason(xrSim::ValidateFreeplayDecision(population, trader, PlanOf({{"move_to", "esc_smart_1"}})),
+                      "constrained"),
+               "constrained") && ok;
+}
+
+bool TestConstrainedOwnerOnlyStays()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync("xrsim_freeplay_sync_v1\n"
+                                 "group 500 esc_pals stalker stalker l01_escape esc_smart_a - companion 1\n"
+                                 "member 500 601 sim_default_stalker_1 1\n"
+                                 "npc 700 esc_m_trader stalker trader l01_escape\n"
+                                 "end\n"));
+    const xrSim::FreeplayOwner& companion = RequireGroup(population, 500);
+    const xrSim::FreeplayObservation companionView =
+        RequireObservation(population, ObservationFor(companion.ownerId, 1, 3, 0));
+    bool ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, companionView,
+                                   PlanOf({{"move_to", "esc_smart_1"}})),
+                         "constrained"),
+        "writer companion cannot move");
+    ok = Expect(HasReason(xrSim::ValidateFreeplayDecision(population, companionView,
+                              PlanOf({{"retreat", "esc_smart_1"}})),
+                    "constrained"),
+        "writer companion cannot retreat") && ok;
+    const xrSim::FreeplayVerdict stays =
+        xrSim::ValidateFreeplayDecision(population, companionView, PlanOf({{"stay", ""}}));
+    ok = Expect(stays.ok && stays.verb == "stay" && stays.site == "esc_smart_a",
+        ("writer companion may stay: " + stays.reason).c_str()) && ok;
+
+    const xrSim::FreeplayOwner* trader = population.FindByBinding(xrSim::FreeplayBinding::Npc, 700);
+    if (!Expect(trader != nullptr, "npc owner exists"))
+        return false;
+    const xrSim::FreeplayObservation traderView =
+        RequireObservation(population, ObservationFor(trader->ownerId, 1, 3, 0));
+    return Expect(HasReason(xrSim::ValidateFreeplayDecision(population, traderView,
+                                PlanOf({{"move_to", "esc_smart_1"}})),
+                      "constrained"),
+               "npc-bound owner cannot move") && ok;
+}
+
+bool TestCoastKeepsObjective()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    const xrSim::FreeplayObservation observation = RequireObservation(population, kSquadObservation);
+    const xrSim::ActorIntentParseResult coast = xrSim::ParseActorIntentPlan("xrsim_actor_intent_v1\ncoast\nend\n");
+    if (!Expect(coast.ok, "coast text parses"))
+        return false;
+    const xrSim::FreeplayVerdict verdict = xrSim::ValidateFreeplayDecision(population, observation, coast.plan);
+    return Expect(verdict.ok && verdict.keep, "coast keeps the objective");
+}
+
+bool TestStaleAfterSplitRejected()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    const xrSim::FreeplayObservation observation = RequireObservation(population, kSquadObservation);
+    RequireSetup(population.Sync(std::string(kGroup500Header) + "member 500 601 sim_default_stalker_1 1\n" +
+        "group 520 esc_split stalker stalker l01_escape esc_smart_a - sim 1\n" +
+        "member 520 602 sim_default_stalker_0 1\n" + kGroup510AndTrader + "end\n"));
+    return Expect(HasReason(xrSim::ValidateFreeplayDecision(population, observation,
+                                PlanOf({{"move_to", "esc_smart_c"}})),
+                      "stale_membership"),
+        "observation taken before a split is stale");
+}
+
+bool TestLedgerKeepsNewest512()
+{
+    xrSim::FreeplayLedger ledger;
+    for (int i = 0; i < 600; ++i)
+    {
+        xrSim::FreeplayLedgerEntry entry;
+        entry.ownerId = 1;
+        entry.wakeReason = "timer";
+        entry.source = "live";
+        entry.verdict = i == 599 ? "provider error: timed out" : "accepted";
+        entry.verb = "move_to";
+        entry.site = "esc_smart_c";
+        ledger.Append(entry);
+    }
+    const std::string last = ledger.Format(1);
+    bool ok = Expect(ledger.Size() == 512, "ledger keeps the newest 512");
+    ok = Expect(last.find("serial=600 ") != std::string::npos, "newest entry has serial 600") && ok;
+    ok = Expect(std::count(last.begin(), last.end(), '\n') == 1, "format(1) prints one line") && ok;
+    ok = Expect(last.find("ownerId=1 ") != std::string::npos && last.find("wakeReason=timer ") != std::string::npos &&
+            last.find("queueAgeMs=0") != std::string::npos && last.find("verdict=provider_error:_timed_out ") !=
+            std::string::npos && last.find("provider=- ") != std::string::npos,
+        ("ledger line fields: " + last).c_str()) && ok;
+    const std::string all = ledger.Format(1000);
+    ok = Expect(std::count(all.begin(), all.end(), '\n') == 512, "format prints at most the kept entries") && ok;
+    return Expect(all.rfind("serial=89 ", 0) == 0, "oldest kept entry is serial 89") && ok;
+}
 } // namespace
 
 int main()
@@ -397,5 +711,13 @@ int main()
     ok = TestChangedOwnersReportedOnce() && ok;
     ok = TestCensusLevelFilter() && ok;
     ok = TestObjectiveAndMemoryValidation() && ok;
+    ok = TestObservationParseAndLimits() && ok;
+    ok = TestWakePromptListsSitesAndRules() && ok;
+    ok = TestDecisionAcceptsListedSite() && ok;
+    ok = TestDecisionRejections() && ok;
+    ok = TestConstrainedOwnerOnlyStays() && ok;
+    ok = TestCoastKeepsObjective() && ok;
+    ok = TestStaleAfterSplitRejected() && ok;
+    ok = TestLedgerKeepsNewest512() && ok;
     return ok ? 0 : 1;
 }
