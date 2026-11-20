@@ -3,6 +3,7 @@
 #include "xrSim/xrSimAnthropicTransport.h"
 #include "xrSim/xrSimActorProvider.h"
 #include "xrSim/xrSimActorRuntime.h"
+#include "xrSim/xrSimFreeplayBridge.h"
 #include "xrSim/xrSimNullAgent.h"
 #include "xrSim/xrSimPackSpawn.h"
 #include "xrSim/xrSimWorldState.h"
@@ -471,9 +472,13 @@ std::string PollLiveActorWake(const std::string& payload, bool& ok)
 
 std::string HandleBridgeVerb(const std::string& verb, const std::string& payload, bool& ok)
 {
+    if (verb.rfind("ai.freeplay.", 0) == 0)
+        return HandleFreeplayVerb(verb, payload, ok);
+
     if (verb == "ai.reset")
     {
         ResetDebugWorld();
+        ResetFreeplay();
         ok = true;
         return "xrsim reset";
     }

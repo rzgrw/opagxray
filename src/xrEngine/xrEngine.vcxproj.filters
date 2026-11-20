@@ -300,6 +300,9 @@
     <ClInclude Include="pure.h">
       <Filter>Engine</Filter>
     </ClInclude>
+    <ClInclude Include="xrSimScript.h">
+      <Filter>Engine</Filter>
+    </ClInclude>
     <ClInclude Include="XR_IOConsole.h">
       <Filter>Engine\Console</Filter>
     </ClInclude>
@@ -510,6 +513,9 @@
       <Filter>Render\Execution &amp; 3D\TextConsole</Filter>
     </ClCompile>
     <ClCompile Include="pure.cpp">
+      <Filter>Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="xrSim_script.cpp">
       <Filter>Engine</Filter>
     </ClCompile>
     <ClCompile Include="XR_IOConsole.cpp">

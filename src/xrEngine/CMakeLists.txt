@@ -29,6 +29,8 @@ add_library(xrSimCore STATIC
     xrSim/xrSimBridge.h
     xrSim/xrSimFreeplay.cpp
     xrSim/xrSimFreeplay.h
+    xrSim/xrSimFreeplayBridge.cpp
+    xrSim/xrSimFreeplayBridge.h
     xrSim/xrSimFreeplayDecision.cpp
     xrSim/xrSimFreeplayDecision.h
     xrSim/xrSimFreeplayScheduler.cpp
@@ -161,6 +163,8 @@ target_sources_grouped(
     Properties.h
     pure.cpp
     pure.h
+    xrSim_script.cpp
+    xrSimScript.h
 )
 
 target_sources_grouped(

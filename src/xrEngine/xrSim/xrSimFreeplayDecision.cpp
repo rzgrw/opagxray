@@ -25,10 +25,10 @@ FreeplayVerdict FailVerdict(const char* reason)
     return verdict;
 }
 
-bool IsSeparator(char c) { return c == ' ' || c == '\t' || c == '\r'; }
+bool IsObservationSeparator(char c) { return c == ' ' || c == '\t' || c == '\r'; }
 
 // Same record separators as the freeplay snapshot: newline or ';' ends a record.
-std::vector<std::vector<std::string>> SplitRecords(const std::string& text)
+std::vector<std::vector<std::string>> SplitObservationRecords(const std::string& text)
 {
     std::vector<std::vector<std::string>> records;
     std::vector<std::string> tokens;
@@ -36,7 +36,7 @@ std::vector<std::vector<std::string>> SplitRecords(const std::string& text)
     for (size_t i = 0; i <= text.size(); ++i)
     {
         const char c = i < text.size() ? text[i] : '\n';
-        if (c == '\n' || c == ';' || IsSeparator(c))
+        if (c == '\n' || c == ';' || IsObservationSeparator(c))
         {
             if (!token.empty())
                 tokens.push_back(token);
@@ -111,7 +111,7 @@ std::string LedgerValue(const std::string& value)
 
 FreeplayObservationParse ParseFreeplayObservation(const FreeplayPopulation& population, const std::string& text)
 {
-    const std::vector<std::vector<std::string>> records = SplitRecords(text);
+    const std::vector<std::vector<std::string>> records = SplitObservationRecords(text);
     if (records.empty() || records[0].size() != 1 || records[0][0] != kObservationHeader)
         return FailObservation("malformed");
 
@@ -147,6 +147,8 @@ FreeplayObservationParse ParseFreeplayObservation(const FreeplayPopulation& popu
         {
             FreeplaySite site;
             if (record.size() != 5 || !ParseU32(record[2], site.distanceMeters) || !ParseU32(record[4], site.occupants))
+                return FailObservation("malformed");
+            if (record[1] == "-")
                 return FailObservation("malformed");
             site.name = record[1];
             site.kind = record[3];
@@ -293,6 +295,11 @@ FreeplayVerdict ValidateFreeplayDecision(const FreeplayPopulation& population,
     verdict.verb = objective->verb;
     verdict.site = objective->verb == "stay" ? owner->site : objective->target;
     verdict.memories = plan.memories;
+    for (const ActorAction& action : plan.actions)
+    {
+        if (action.verb == "author_memory")
+            verdict.memories.push_back(action.target);
+    }
     return verdict;
 }
 

@@ -106,6 +106,7 @@
     <ClInclude Include="xr_efflensflare.h" />
     <ClInclude Include="xr_input.h" />
     <ClInclude Include="xr_level_controller.h" />
+    <ClInclude Include="xrSimScript.h" />
     <ClInclude Include="AgentBridge.h" />
     <ClInclude Include="FrameTimeCollector.h" />
     <ClInclude Include="FrameTimeSession.h" />
@@ -121,6 +122,7 @@
     <ClInclude Include="xrSim\xrSimAnthropicTransport.h" />
     <ClInclude Include="xrSim\xrSimBridge.h" />
     <ClInclude Include="xrSim\xrSimFreeplay.h" />
+    <ClInclude Include="xrSim\xrSimFreeplayBridge.h" />
     <ClInclude Include="xrSim\xrSimFreeplayDecision.h" />
     <ClInclude Include="xrSim\xrSimFreeplayScheduler.h" />
     <ClInclude Include="xrSim\xrSimNullAgent.h" />
@@ -245,6 +247,9 @@
     <ClCompile Include="xrSim\xrSimFreeplay.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="xrSim\xrSimFreeplayBridge.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="xrSim\xrSimFreeplayDecision.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -262,6 +267,7 @@
     </ClCompile>
     <ClCompile Include="xr_input.cpp" />
     <ClCompile Include="XR_IOConsole_script.cpp" />
+    <ClCompile Include="xrSim_script.cpp" />
     <ClCompile Include="xr_level_controller.cpp" />
     <ClCompile Include="XR_IOConsole.cpp" />
     <ClCompile Include="XR_IOConsole_callback.cpp" />

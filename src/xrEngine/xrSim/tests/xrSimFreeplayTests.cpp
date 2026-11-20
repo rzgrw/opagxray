@@ -1,11 +1,18 @@
+#include "xrSim/xrSimActorRuntime.h"
+#include "xrSim/xrSimBridge.h"
 #include "xrSim/xrSimFreeplay.h"
+#include "xrSim/xrSimFreeplayBridge.h"
 #include "xrSim/xrSimFreeplayDecision.h"
 #include "xrSim/xrSimFreeplayScheduler.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
+#include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -472,6 +479,7 @@ bool TestObservationParseAndLimits()
         {"xrsim_freeplay_observation_v1\nowner 1 1\nend\n", "malformed"},
         {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsite a 1x camp 0\nend\n", "malformed"},
         {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsite a 1 camp\nend\n", "malformed"},
+        {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsite - 1 camp 0\nend\n", "malformed"},
         {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsighting a robot f 1 2 enemy\nend\n",
             "malformed"},
         {"xrsim_freeplay_observation_v1\nowner 1 1\nsituation quiet\nsighting a mutant f 1 2 hungry\nend\n",
@@ -533,8 +541,8 @@ bool TestDecisionAcceptsListedSite()
     const xrSim::FreeplayVerdict verdict = xrSim::ValidateFreeplayDecision(population, observation, plan);
     bool ok = Expect(verdict.ok && !verdict.keep && verdict.verb == "move_to" && verdict.site == "esc_smart_c",
         ("move_to listed site accepted: " + verdict.reason).c_str());
-    ok = Expect(verdict.memories == std::vector<std::string>{"dogs_near_bridge"}, "verdict carries plan memories") &&
-        ok;
+    ok = Expect(verdict.memories == std::vector<std::string>{"dogs_near_bridge", "saw_dogs"},
+        "verdict carries plan memories, then author_memory targets") && ok;
 
     const xrSim::ActorIntentParseResult stay =
         xrSim::ParseActorIntentPlan("xrsim_actor_intent_v1\naction stay\nmemory quiet_night\nend\n");
@@ -908,6 +916,278 @@ bool TestForgetRemovesOwner()
     return Expect(scheduler.State(2) == xrSim::FreeplayWakeState::Idle && scheduler.Reasons(2).empty(),
                "retired owner dropped from the scheduler") && ok;
 }
+
+// --- ai.freeplay.* verbs through the bridge ---
+
+struct VerbReply
+{
+    bool ok = false;
+    std::string text;
+};
+
+VerbReply Verb(const std::string& verb, const std::string& payload = std::string())
+{
+    VerbReply reply;
+    reply.text = xrSim::HandleBridgeVerb(verb, payload, reply.ok);
+    return reply;
+}
+
+std::string RequireVerb(const std::string& verb, const std::string& payload = std::string())
+{
+    const VerbReply reply = Verb(verb, payload);
+    if (!Expect(reply.ok, ("test setup: " + verb + " " + payload + " -> " + reply.text).c_str()))
+        std::exit(EXIT_FAILURE);
+    return reply.text;
+}
+
+bool Contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+
+void ClearProviderEnvironment()
+{
+#if defined(_WIN32)
+    _putenv_s("XRAY_AGENT_API_KEY", "");
+    _putenv_s("ANTHROPIC_API_KEY", "");
+#else
+    unsetenv("XRAY_AGENT_API_KEY");
+    unsetenv("ANTHROPIC_API_KEY");
+#endif
+}
+
+// Fresh freeplay runtime in the given mode with kTwoGroups enrolled (owners 1..3 in epoch 1).
+void StartFreeplay(const char* mode)
+{
+    RequireVerb("ai.reset");
+    RequireVerb("ai.freeplay.mode", mode);
+    RequireVerb("ai.freeplay.begin");
+    RequireSetup(xrSim::FreeplayResult{RequireVerb("ai.freeplay.sync", kTwoGroups) == "owners=3", "owners=3"});
+}
+
+void StartLive(const std::vector<std::string>& script)
+{
+    RequireVerb("ai.reset");
+    xrSim::SetFreeplayProviderForTests(std::make_unique<xrSim::RecordedActorIntentProvider>(script));
+    RequireVerb("ai.freeplay.mode", "live");
+    RequireVerb("ai.freeplay.begin");
+    RequireSetup(xrSim::FreeplayResult{RequireVerb("ai.freeplay.sync", kTwoGroups) == "owners=3", "owners=3"});
+}
+
+// Ticks at nowMs until the ledger contains needle; returns every tick line seen.
+std::string TickUntilLogged(const std::string& needle, uint64_t nowMs)
+{
+    std::string ticks;
+    for (int i = 0; i < 200; ++i)
+    {
+        ticks += RequireVerb("ai.freeplay.tick", std::to_string(nowMs));
+        if (Contains(RequireVerb("ai.freeplay.log"), needle))
+            return ticks;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    Expect(false, ("ledger never showed " + needle).c_str());
+    return ticks;
+}
+
+std::string OwnerLine(uint64_t ownerId)
+{
+    std::istringstream lines(RequireVerb("ai.freeplay.owners"));
+    std::string line;
+    const std::string prefix = "owner " + std::to_string(ownerId) + " ";
+    while (std::getline(lines, line))
+        if (line.rfind(prefix, 0) == 0)
+            return line;
+    return std::string();
+}
+
+const char* kLiveMoveReply = "xrsim_actor_intent_v1\ngoal regroup\naction move_to esc_smart_c\nend\n";
+
+bool TestRecordedDecisionFlow()
+{
+    StartFreeplay("recorded");
+    const std::string first = RequireVerb("ai.freeplay.tick", "0");
+    bool ok = Expect(Contains(first, "observe 1 group 500 1\n"), ("first tick asks owner 1 to observe: " + first).c_str());
+    ok = Expect(Contains(first, "apply 1 500 1 move_to esc_smart_b bootstrap\n"), "first tick applies the bootstrap") &&
+        ok;
+    ok = Expect(!Contains(first, "observe 3 "), "npc-bound owner never observes") && ok;
+    ok = Expect(Verb("ai.freeplay.observe", kSquadObservation).text == "stored", "recorded observe stores") && ok;
+    const VerbReply decided = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    ok = Expect(decided.ok && decided.text == "accepted move_to esc_smart_c", ("decide: " + decided.text).c_str()) && ok;
+    const std::string second = RequireVerb("ai.freeplay.tick", "1");
+    ok = Expect(Contains(second, "apply 1 500 2 move_to esc_smart_c recorded\n"),
+        ("next tick applies the recorded decision: " + second).c_str()) && ok;
+    ok = Expect(!Contains(second, "apply 2 "), "unchanged owner is not applied again") && ok;
+    ok = Expect(OwnerLine(1) == "owner 1 name=esc_stalkers kind=squad binding=group:500 writer=sim level=l01_escape "
+                                "members=2 mrev=1 state=idle objective=move_to:esc_smart_c source=recorded rev=2 "
+                                "sites=esc_smart_a,esc_smart_b,esc_smart_c",
+        ("owners line: " + OwnerLine(1)).c_str()) && ok;
+    const std::string log = RequireVerb("ai.freeplay.log");
+    return Expect(Contains(log, "ownerId=1 epoch=1 membershipRevision=1 wakeReason=spawn source=recorded "
+                                "verdict=accepted verb=move_to site=esc_smart_c"),
+               ("decision ledger line: " + log).c_str()) && ok;
+}
+
+bool TestDecideRejectsUnknownSite()
+{
+    StartFreeplay("recorded");
+    RequireVerb("ai.freeplay.tick", "0");
+    const VerbReply early = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    bool ok = Expect(!early.ok && early.text == "no_observation", "decide needs a stored observation");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    const VerbReply rejected = Verb("ai.freeplay.decide", "1 move_to nowhere");
+    ok = Expect(!rejected.ok && rejected.text == "unknown_site", ("unknown site rejected: " + rejected.text).c_str()) &&
+        ok;
+    ok = Expect(!Contains(RequireVerb("ai.freeplay.tick", "1"), "apply "), "rejected decision applies nothing") && ok;
+    return Expect(Contains(RequireVerb("ai.freeplay.log"), "source=recorded verdict=unknown_site"),
+               "rejection is logged") && ok;
+}
+
+bool TestLiveDecisionFlow()
+{
+    StartLive({kLiveMoveReply});
+    bool ok = Expect(Contains(RequireVerb("ai.freeplay.tick", "0"), "observe 1 group 500 1\n"), "owner 1 observes");
+    ok = Expect(Verb("ai.freeplay.observe", kSquadObservation).text == "submitted request=1", "live observe submits") &&
+        ok;
+    const std::string ticks = TickUntilLogged("verdict=accepted", 1);
+    ok = Expect(Contains(ticks, "apply 1 500 2 move_to esc_smart_c live\n"), ("live apply line: " + ticks).c_str()) &&
+        ok;
+    const std::string log = RequireVerb("ai.freeplay.log");
+    ok = Expect(Contains(log, "source=live") && Contains(log, "verdict=accepted") &&
+            Contains(log, "provider=recorded-actor model=fixture"),
+        ("live ledger line: " + log).c_str()) && ok;
+    return Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_c source=live rev=2"), "live objective stored") &&
+        ok;
+}
+
+bool TestReplyAfterBeginWorldIsStale()
+{
+    StartLive({kLiveMoveReply});
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", kTwoGroups);
+    const std::string ticks = TickUntilLogged("stale_world", 0);
+    bool ok = Expect(!Contains(ticks, " live\n"), "stale reply applies nothing");
+    ok = Expect(Contains(ticks, "observe 4 group 500 1\n"), ("re-enrolled owner observes again: " + ticks).c_str()) &&
+        ok;
+    return Expect(Contains(OwnerLine(4), "source=bootstrap rev=1"), "re-enrolled owner keeps its bootstrap") && ok;
+}
+
+bool TestStaleReplyAfterSplit()
+{
+    StartLive({kLiveMoveReply});
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    RequireVerb("ai.freeplay.sync", std::string(kGroup500Header) + "member 500 601 sim_default_stalker_1 1\n" +
+        "group 520 esc_split stalker stalker l01_escape esc_smart_a - sim 1\n" +
+        "member 520 602 sim_default_stalker_0 1\n" + kGroup510AndTrader + "end\n");
+    const std::string ticks = TickUntilLogged("stale_membership", 1);
+    bool ok = Expect(!Contains(ticks, " live\n"), "stale reply applies nothing");
+    return Expect(Contains(OwnerLine(1), "mrev=2 ") &&
+               Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=bootstrap rev=1"),
+               ("objective unchanged after split: " + OwnerLine(1)).c_str()) && ok;
+}
+
+bool TestProviderErrorHolds()
+{
+    StartLive({});
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    const std::string ticks = TickUntilLogged("source=hold", 1);
+    bool ok = Expect(!Contains(ticks, "apply 1 "), "provider error applies nothing");
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=bootstrap rev=1"),
+        "objective and revision unchanged") && ok;
+    return Expect(Contains(RequireVerb("ai.freeplay.log"), "verdict=recorded_actor_provider_exhausted"),
+               "provider error is the verdict") && ok;
+}
+
+bool TestLiveModeRefusedWithoutProvider()
+{
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    const VerbReply live = Verb("ai.freeplay.mode", "live");
+    bool ok = Expect(!live.ok && (live.text == "provider_disabled" || live.text == "missing_api_key"),
+        ("live refused: " + live.text).c_str());
+    ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "mode still off") && ok;
+    const VerbReply observe = Verb("ai.freeplay.observe", kSquadObservation);
+    return Expect(!observe.ok && observe.text == "mode_off", "observe refused in mode off") && ok;
+}
+
+bool TestBlockedEventRewakesOwner()
+{
+    StartFreeplay("recorded");
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    bool ok = Expect(Contains(OwnerLine(1), "state=idle "), "observed owner is idle");
+    ok = Expect(Verb("ai.freeplay.event", "500 blocked esc_smart_c").text == "queued", "event queues a wake") && ok;
+    ok = Expect(Contains(OwnerLine(1), "state=queued "), ("blocked owner queued: " + OwnerLine(1)).c_str()) && ok;
+    const std::string log = RequireVerb("ai.freeplay.log");
+    ok = Expect(Contains(log, "ownerId=1 epoch=1 membershipRevision=1 wakeReason=blocked source=event verdict=event "
+                              "verb=- site=esc_smart_c"),
+        ("event ledger line: " + log).c_str()) && ok;
+    const size_t lines = std::count(log.begin(), log.end(), '\n');
+    const VerbReply unknown = Verb("ai.freeplay.event", "999 blocked esc_smart_c");
+    ok = Expect(!unknown.ok && unknown.text == "unknown_group", "event for unknown group refused") && ok;
+    const std::string after = RequireVerb("ai.freeplay.log");
+    return Expect(size_t(std::count(after.begin(), after.end(), '\n')) == lines, "refused event writes nothing") && ok;
+}
+
+bool TestModeOffEmitsNothing()
+{
+    RequireVerb("ai.reset");
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", kTwoGroups);
+    bool ok = Expect(RequireVerb("ai.freeplay.tick", "0").empty(), "mode off tick emits nothing");
+    return Expect(SummaryLine(RequireVerb("ai.freeplay.census")) ==
+                   "summary npcs=4 owners=3 transferable=2 script_owned=0 unbound=1",
+               "census still works in mode off") && ok;
+}
+
+bool TestResetClearsFreeplay()
+{
+    StartFreeplay("recorded");
+    RequireVerb("ai.reset");
+    bool ok = Expect(SummaryLine(RequireVerb("ai.freeplay.census")) ==
+                         "summary npcs=0 owners=0 transferable=0 script_owned=0 unbound=0",
+        "reset drops every owner");
+    return Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "reset sets mode off") && ok;
+}
+
+// Recorded observations free their scheduler slot, so every owner is served without any decide.
+bool TestRecordedObservationsFreeSlots()
+{
+    RequireVerb("ai.reset");
+    RequireVerb("ai.freeplay.mode", "recorded");
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", FiveSquads());
+    for (uint64_t now = 0; now < 5; ++now)
+    {
+        std::istringstream lines(RequireVerb("ai.freeplay.tick", std::to_string(now)));
+        std::string kind;
+        uint64_t ownerId = 0;
+        std::string rest;
+        while (lines >> kind >> ownerId && std::getline(lines, rest))
+            if (kind == "observe")
+                RequireVerb("ai.freeplay.observe", ObservationFor(ownerId, 1, 1, 0));
+    }
+    bool ok = true;
+    for (uint64_t ownerId = 1; ownerId <= 5; ++ownerId)
+        ok = Expect(Contains(OwnerLine(ownerId), " sites=esc_smart_0"),
+            ("owner has a stored observation: " + OwnerLine(ownerId)).c_str()) && ok;
+    RequireVerb("ai.freeplay.wake", "1 probe");
+    const VerbReply notRequested = Verb("ai.freeplay.observe", ObservationFor(1, 1, 1, 0));
+    return Expect(!notRequested.ok && notRequested.text == "not_requested", "unrequested observation refused") && ok;
+}
+
+bool TestRetireForgetsOwner()
+{
+    StartFreeplay("recorded");
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    bool ok = Expect(Verb("ai.freeplay.retire", "500").text == "retired", "retire known group");
+    ok = Expect(OwnerLine(1).empty(), "retired owner listed no more") && ok;
+    const VerbReply again = Verb("ai.freeplay.retire", "500");
+    ok = Expect(!again.ok && again.text == "unknown_group", "retire twice refused") && ok;
+    const VerbReply decide = Verb("ai.freeplay.decide", "1 stay");
+    return Expect(!decide.ok && decide.text == "no_observation", "retire discards the stored observation") && ok;
+}
 } // namespace
 
 int main()
@@ -942,5 +1222,18 @@ int main()
     ok = TestProviderFailureBacksOff() && ok;
     ok = TestObservationTimeoutFreesSlot() && ok;
     ok = TestForgetRemovesOwner() && ok;
+    ok = TestRecordedDecisionFlow() && ok;
+    ok = TestDecideRejectsUnknownSite() && ok;
+    ok = TestLiveDecisionFlow() && ok;
+    ok = TestReplyAfterBeginWorldIsStale() && ok;
+    ok = TestStaleReplyAfterSplit() && ok;
+    ok = TestProviderErrorHolds() && ok;
+    ok = TestLiveModeRefusedWithoutProvider() && ok;
+    ok = TestBlockedEventRewakesOwner() && ok;
+    ok = TestModeOffEmitsNothing() && ok;
+    ok = TestResetClearsFreeplay() && ok;
+    ok = TestRecordedObservationsFreeSlots() && ok;
+    ok = TestRetireForgetsOwner() && ok;
+    RequireVerb("ai.reset");
     return ok ? 0 : 1;
 }
