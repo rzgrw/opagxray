@@ -48,8 +48,20 @@ local smart_level = {}     -- [smart id] = level id (cached)
 -- helpers
 ------------------------------------------------------------------------------------------------
 
+-- CoC's printf writes through the engine's Lua log, which drops every line unless the console
+-- has "lua_debug on". The adapter's own lines must always reach the log (an adapter error is
+-- otherwise invisible), so they go through log1 (Msg) when the engine has it, else printf.
+local function emit(line)
+	local log_line = rawget(_G, "log1")
+	if type(log_line) == "function" then
+		log_line(line)
+	else
+		printf("%s", line)
+	end
+end
+
 local function log_info(text)
-	printf("xrsim_freeplay: %s", text)
+	emit("xrsim_freeplay: " .. text)
 end
 
 local function warn_once(key, text)
@@ -57,7 +69,7 @@ local function warn_once(key, text)
 		return
 	end
 	warned[key] = true
-	printf("~ xrsim_freeplay: %s", text)
+	emit("~ xrsim_freeplay: " .. text)
 end
 
 local function call(verb, payload)
@@ -473,14 +485,14 @@ local function on_first_update()
 	local ok, text = call("ai.freeplay.mode", mode)
 	if not ok then
 		failed = true
-		printf("! xrsim_freeplay: %s", text)
+		emit("! xrsim_freeplay: " .. text)
 		SetHudMsg("xrsim_freeplay: " .. text, 10)
 		return false
 	end
 	local began, epoch = call("ai.freeplay.begin", "")
 	if not began then
 		failed = true
-		printf("! xrsim_freeplay: %s", epoch)
+		emit("! xrsim_freeplay: " .. epoch)
 		SetHudMsg("xrsim_freeplay: " .. epoch, 10)
 		return false
 	end
@@ -590,7 +602,7 @@ local function guarded(name, body, needs_active)
 		if not ok then
 			failed = true
 			active = false
-			printf("! xrsim_freeplay: lua error in %s: %s", name, tostring(result))
+			emit("! xrsim_freeplay: lua error in " .. name .. ": " .. tostring(result))
 			unregister_all()
 		elseif result == false then
 			unregister_all()
@@ -611,7 +623,7 @@ function on_game_start()
 	end
 	verb_fn = rawget(_G, "xrsim_verb")
 	if type(verb_fn) ~= "function" then
-		printf("! xrsim_freeplay: xrsim_verb is not available, adapter stays off")
+		emit("! xrsim_freeplay: xrsim_verb is not available, adapter stays off")
 		return
 	end
 	mode = requested
