@@ -27,6 +27,8 @@ add_library(xrSimCore STATIC
     xrSim/xrSimAnthropicTransport.h
     xrSim/xrSimBridge.cpp
     xrSim/xrSimBridge.h
+    xrSim/xrSimFreeplay.cpp
+    xrSim/xrSimFreeplay.h
     xrSim/xrSimNullAgent.cpp
     xrSim/xrSimNullAgent.h
     xrSim/xrSimPackSpawn.cpp
@@ -73,6 +75,15 @@ target_include_directories(xrSimAuthoritySpineTests PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
 )
 target_link_libraries(xrSimAuthoritySpineTests PRIVATE xrSimCore)
+
+add_executable(xrSimFreeplayTests EXCLUDE_FROM_ALL
+    xrSim/tests/xrSimFreeplayTests.cpp
+)
+target_include_directories(xrSimFreeplayTests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/src"
+)
+target_link_libraries(xrSimFreeplayTests PRIVATE xrSimCore)
 
 # Configure-time source identity includes the telemetry implementation bytes and
 # honestly labels the worktree; it does not claim authenticated runtime assets.

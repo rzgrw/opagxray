@@ -10,6 +10,6 @@ command -v ninja >/dev/null 2>&1 && GEN=(-G Ninja)
 cmake -S "$HERE" -B "$OUT" "${GEN[@]}" -DCMAKE_BUILD_TYPE=Release >"$OUT.cmake.log" 2>&1 || { cat "$OUT.cmake.log"; exit 1; }
 cmake --build "$OUT" --parallel
 cd "$ROOT"
-for t in xrSimWorldStateTests xrSimAuthoritySpineTests; do
+for t in xrSimWorldStateTests xrSimAuthoritySpineTests xrSimFreeplayTests; do
   echo "== $t"; "$OUT/$t"; echo "   exit=$?"
 done
