@@ -219,6 +219,49 @@ bool TestReusedGroupIdGetsNewOwner()
     return Expect(reused.objective.site != "esc_smart_b", "reused group never keeps the old site") && ok;
 }
 
+bool TestReusedGroupIdWithoutRetireGetsNewOwner()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    const uint64_t oldId = RequireGroup(population, 500).ownerId;
+    RequireSetup(population.SetObjective(oldId, "move_to", "esc_smart_c", xrSim::FreeplayObjectiveSource::Recorded));
+    RequireSetup(population.AddMemory(oldId, "ambushed_at_bridge"));
+    population.TakeChangedOwners();
+    RequireSetup(population.Sync(std::string("xrsim_freeplay_sync_v1\n"
+                                             "group 500 esc_new stalker stalker l01_escape esc_smart_a esc_smart_d sim 1\n"
+                                             "member 500 801 sim_default_stalker_2 1\n"
+                                             "member 500 802 sim_default_stalker_3 0\n") +
+        kGroup510AndTrader + "end\n"));
+    const xrSim::FreeplayOwner& reused = RequireGroup(population, 500);
+    bool ok = Expect(reused.ownerId != oldId && reused.ownerId == 4, "reused group id without retire gets a new owner");
+    ok = Expect(population.FindOwner(oldId) == nullptr, "previous occupant retired") && ok;
+    ok = Expect(HasObjective(reused, "move_to", "esc_smart_d", xrSim::FreeplayObjectiveSource::Bootstrap) &&
+            reused.objective.revision == 1,
+        "new occupant bootstraps from the snapshot") && ok;
+    ok = Expect(reused.memories.empty() && reused.membershipRevision == 1, "new occupant starts with no memories") && ok;
+    return Expect(population.TakeChangedOwners() == std::vector<uint64_t>{reused.ownerId},
+               "new occupant is reported as changed") && ok;
+}
+
+bool TestReusedNpcIdWithNewSectionGetsNewOwner()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    const xrSim::FreeplayOwner* trader = population.FindByBinding(xrSim::FreeplayBinding::Npc, 700);
+    if (!Expect(trader != nullptr, "npc owner exists"))
+        return false;
+    const uint64_t oldId = trader->ownerId;
+    RequireSetup(population.AddMemory(oldId, "sold_ammo"));
+    RequireSetup(population.Sync(std::string(kGroup500Header) + "member 500 601 sim_default_stalker_1 1\n" +
+        "member 500 602 sim_default_stalker_0 0\n" + "group 510 esc_dogs mutant monster_predatory_day l01_escape - - sim 0\n" +
+        "member 510 611 dog_weak 1\n" + "npc 700 esc_wolf stalker stalker l01_escape\n" + "end\n"));
+    const xrSim::FreeplayOwner* reused = population.FindByBinding(xrSim::FreeplayBinding::Npc, 700);
+    return Expect(reused != nullptr && reused->ownerId != oldId && reused->ownerId == 4,
+               "reused npc id with a new section gets a new owner") &&
+        Expect(reused != nullptr && reused->memories.empty(), "new npc occupant starts with no memories") &&
+        Expect(population.FindOwner(oldId) == nullptr, "previous npc occupant retired");
+}
+
 bool TestAbsentGroupIsRetired()
 {
     xrSim::FreeplayPopulation population;
@@ -345,6 +388,8 @@ int main()
     ok = TestSyncIsAtomicOnBadRecord() && ok;
     ok = TestLeaderLossKeepsOwnerAndObjective() && ok;
     ok = TestReusedGroupIdGetsNewOwner() && ok;
+    ok = TestReusedGroupIdWithoutRetireGetsNewOwner() && ok;
+    ok = TestReusedNpcIdWithNewSectionGetsNewOwner() && ok;
     ok = TestAbsentGroupIsRetired() && ok;
     ok = TestSplitInheritsObjective() && ok;
     ok = TestJoinAdoptsGroupObjective() && ok;

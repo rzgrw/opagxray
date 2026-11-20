@@ -274,7 +274,27 @@ FreeplayResult ParseSnapshot(const std::string& snapshot, std::vector<StagedOwne
 
 using BindingKey = std::pair<FreeplayBinding, uint16_t>;
 
-// A new group whose members all belonged to one owner before this sync is a split of it.
+// A binding still in the snapshot holds a new occupant when nothing ties it to the previous
+// one: a group whose member set shares no object ID, or an npc whose section changed.
+// Reused server IDs must never inherit the previous occupant's mind.
+bool IsNewOccupant(const FreeplayOwner& previous, const StagedOwner& staged)
+{
+    if (previous.binding == FreeplayBinding::Npc)
+        return previous.members.empty() || staged.members.empty() ||
+            previous.members[0].section != staged.members[0].section;
+    for (const FreeplayMember& before : previous.members)
+    {
+        for (const FreeplayMember& after : staged.members)
+        {
+            if (before.objectId == after.objectId)
+                return false;
+        }
+    }
+    return true;
+}
+
+// A new group whose members all belonged to one other owner before this sync is a split of it.
+// The previous occupant of the group's own binding never counts as that owner.
 const FreeplayOwner* SplitSource(const StagedOwner& staged, const std::vector<FreeplayOwner>& previous,
     const std::map<uint16_t, size_t>& previousOwnerOfNpc)
 {
@@ -289,6 +309,8 @@ const FreeplayOwner* SplitSource(const StagedOwner& staged, const std::vector<Fr
             return nullptr;
         source = owner;
     }
+    if (source != nullptr && source->binding == staged.binding && source->bindingId == staged.bindingId)
+        return nullptr;
     return source;
 }
 
@@ -395,6 +417,8 @@ FreeplayResult FreeplayPopulation::Sync(const std::string& snapshot)
         if (found == stagedByBinding.end())
             continue;   // absent from the living population: retired
         const StagedOwner* source = &staged[found->second];
+        if (IsNewOccupant(previous, *source))
+            continue;   // reused binding: retire the previous occupant, enrol the new one below
         kept.insert(key);
         FreeplayOwner owner = previous;
         CopyDescription(*source, owner);
