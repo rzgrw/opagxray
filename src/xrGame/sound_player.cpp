@@ -199,9 +199,15 @@ void CSoundPlayer::play(
     **/
     sound_single.m_sound->clone((*I).second.second->random(id), st_Effect, sg_SourceType);
 
-    sound_single.m_sound->_get()->g_object = m_object;
-    sound_single.m_sound->_get()->g_userdata = (*I).second.first.m_data;
-    VERIFY(sound_single.m_sound->_handle());
+    // With sound disabled (-nosound, -agent_background) the collection holds empty ref_sounds and
+    // clone() leaves the copy empty. Keep the entry as a silent zero-length sound: every other
+    // ref_sound call on it is already a no-op, so only these direct writes need the check.
+    if (CSound* const clone = sound_single.m_sound->_get())
+    {
+        clone->g_object = m_object;
+        clone->g_userdata = (*I).second.first.m_data;
+        VERIFY(sound_single.m_sound->_handle());
+    }
 
     VERIFY(max_start_time >= min_start_time);
     VERIFY(max_stop_time >= min_stop_time);
