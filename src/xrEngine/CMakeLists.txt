@@ -31,6 +31,8 @@ add_library(xrSimCore STATIC
     xrSim/xrSimFreeplay.h
     xrSim/xrSimFreeplayDecision.cpp
     xrSim/xrSimFreeplayDecision.h
+    xrSim/xrSimFreeplayScheduler.cpp
+    xrSim/xrSimFreeplayScheduler.h
     xrSim/xrSimNullAgent.cpp
     xrSim/xrSimNullAgent.h
     xrSim/xrSimPackSpawn.cpp

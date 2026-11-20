@@ -1,5 +1,6 @@
 #include "xrSim/xrSimFreeplay.h"
 #include "xrSim/xrSimFreeplayDecision.h"
+#include "xrSim/xrSimFreeplayScheduler.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -693,6 +694,220 @@ bool TestLedgerKeepsNewest512()
     ok = Expect(std::count(all.begin(), all.end(), '\n') == 512, "format prints at most the kept entries") && ok;
     return Expect(all.rfind("serial=89 ", 0) == 0, "oldest kept entry is serial 89") && ok;
 }
+
+// Five transferable one-member squads; owner ids 1..5 in group order.
+std::string FiveSquads()
+{
+    std::string text = "xrsim_freeplay_sync_v1\n";
+    for (int i = 0; i < 5; ++i)
+    {
+        const std::string id = std::to_string(500 + i);
+        text += "group " + id + " esc_squad_" + std::to_string(i) + " stalker stalker l01_escape esc_smart_a - sim 1\n";
+        text += "member " + id + " " + std::to_string(600 + i) + " sim_default_stalker_" + std::to_string(i) + " 1\n";
+    }
+    return text + "end\n";
+}
+
+using OwnerIds = std::vector<uint64_t>;
+
+// Hands an owner out and settles it with one decision, as Task 4's tick will.
+void RequireDecided(xrSim::FreeplayScheduler& scheduler, const xrSim::FreeplayPopulation& population,
+    uint64_t ownerId, bool providerFailed, uint64_t takeMs, uint64_t decideMs)
+{
+    scheduler.RequestWake(ownerId, "timer", takeMs);
+    if (!Expect(scheduler.TakeObservationRequests(population, takeMs) == OwnerIds{ownerId},
+            "test setup: owner handed out"))
+        std::exit(EXIT_FAILURE);
+    scheduler.OnObservation(ownerId, takeMs);
+    scheduler.OnDecision(ownerId, providerFailed, decideMs);
+}
+
+bool TestDuplicateWakesCoalesce()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    xrSim::FreeplayScheduler scheduler;
+    scheduler.RequestWake(1, "sighting", 0);
+    scheduler.RequestWake(1, "arrived", 1);
+    scheduler.RequestWake(1, "sighting", 2);
+    bool ok = Expect(scheduler.State(1) == xrSim::FreeplayWakeState::Queued, "woken owner is queued");
+    ok = Expect(scheduler.Reasons(1) == "sighting,arrived", "distinct reasons in arrival order") && ok;
+    ok = Expect(scheduler.QueuedAtMs(1) == 0, "queue time is the first wake") && ok;
+    ok = Expect(scheduler.TakeObservationRequests(population, 3) == OwnerIds{1}, "three wakes make one request") && ok;
+    ok = Expect(scheduler.InFlight() == 1, "one request in flight") && ok;
+    ok = Expect(scheduler.TakeObservationRequests(population, 4).empty(), "no second request") && ok;
+
+    scheduler.RequestWake(1, "membership_changed", 5);
+    ok = Expect(scheduler.Reasons(1) == "sighting,arrived", "in-flight reasons kept until the decision") && ok;
+    ok = Expect(scheduler.QueuedAtMs(1) == 0, "in-flight queue time kept until the decision") && ok;
+    scheduler.OnObservation(1, 6);
+    scheduler.OnDecision(1, false, 7);
+    ok = Expect(scheduler.State(1) == xrSim::FreeplayWakeState::Queued, "wake during flight queues the owner again") &&
+        ok;
+    return Expect(scheduler.Reasons(1) == "membership_changed" && scheduler.QueuedAtMs(1) == 5,
+               "pending wake becomes the queued wake") && ok;
+}
+
+bool TestConcurrencyBoundAndFairness()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(FiveSquads()));
+    xrSim::FreeplayScheduler scheduler;
+    // Queued newest-id first so that age, not id, must decide the order.
+    for (uint64_t t = 0; t < 5; ++t)
+        scheduler.RequestWake(5 - t, "timer", t);
+    bool ok = Expect(scheduler.TakeObservationRequests(population, 4) == OwnerIds{5, 4}, "two oldest handed out");
+    ok = Expect(scheduler.InFlight() == 2, "in flight is bounded at two") && ok;
+    ok = Expect(scheduler.TakeObservationRequests(population, 5).empty(), "full slots hand out nothing") && ok;
+    scheduler.OnObservation(5, 6);
+    ok = Expect(scheduler.State(5) == xrSim::FreeplayWakeState::AwaitingDecision &&
+            scheduler.State(4) == xrSim::FreeplayWakeState::AwaitingObservation,
+        "observation advances one owner") && ok;
+    scheduler.OnDecision(5, false, 7);
+    ok = Expect(scheduler.State(5) == xrSim::FreeplayWakeState::Idle && scheduler.Reasons(5).empty(),
+        "decided owner is idle with no reasons") && ok;
+    return Expect(scheduler.TakeObservationRequests(population, 8) == OwnerIds{3}, "freed slot goes to the third") &&
+        ok;
+}
+
+bool TestMinWakeInterval()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    xrSim::FreeplayScheduler scheduler;
+    RequireDecided(scheduler, population, 1, false, 0, 1000);
+    scheduler.RequestWake(1, "sighting", 2000);
+    bool ok = Expect(scheduler.TakeObservationRequests(population, 40000).empty(), "recently decided owner waits");
+    ok = Expect(scheduler.State(1) == xrSim::FreeplayWakeState::Queued, "waiting owner stays queued") && ok;
+    ok = Expect(scheduler.TakeObservationRequests(population, 45999).empty(), "still waits 1ms before the interval") &&
+        ok;
+    return Expect(scheduler.TakeObservationRequests(population, 46000) == OwnerIds{1},
+               "owner handed out after the interval") && ok;
+}
+
+bool TestPeriodicReconsider()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    xrSim::FreeplayScheduler scheduler;
+    bool ok = Expect(scheduler.TakeObservationRequests(population, 599999).empty(), "no reconsider before interval");
+    const OwnerIds taken = scheduler.TakeObservationRequests(population, 600000);
+    ok = Expect(taken == OwnerIds{1, 2}, "idle transferable owners reconsidered") && ok;
+    ok = Expect(scheduler.Reasons(1) == "reconsider" && scheduler.Reasons(2) == "reconsider",
+        "reconsider reason") && ok;
+    ok = Expect(scheduler.State(3) == xrSim::FreeplayWakeState::Idle, "npc-bound owner not reconsidered") && ok;
+
+    scheduler.OnObservation(1, 600000);
+    scheduler.OnDecision(1, false, 600000);
+    ok = Expect(scheduler.TakeObservationRequests(population, 1199999).empty(), "idle clock restarts at decision") &&
+        ok;
+    return Expect(scheduler.TakeObservationRequests(population, 1200000) == OwnerIds{1},
+               "decided owner reconsidered one interval later") && ok;
+}
+
+bool TestConstrainedOwnersAreNotWoken()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync("xrsim_freeplay_sync_v1\n"
+                                 "group 500 esc_pals stalker stalker l01_escape esc_smart_a - companion 1\n"
+                                 "member 500 601 sim_default_stalker_1 1\n"
+                                 "npc 700 esc_m_trader stalker trader l01_escape\n"
+                                 "end\n"));
+    const uint64_t companion = RequireGroup(population, 500).ownerId;
+    const xrSim::FreeplayOwner* trader = population.FindByBinding(xrSim::FreeplayBinding::Npc, 700);
+    if (!Expect(trader != nullptr, "npc owner exists"))
+        return false;
+    xrSim::FreeplayScheduler scheduler;
+    scheduler.RequestWake(companion, "sighting", 0);
+    scheduler.RequestWake(trader->ownerId, "sighting", 0);
+    bool ok = Expect(scheduler.TakeObservationRequests(population, 0).empty(), "constrained wakes hand out nothing");
+    ok = Expect(scheduler.State(companion) == xrSim::FreeplayWakeState::Idle &&
+            scheduler.State(trader->ownerId) == xrSim::FreeplayWakeState::Idle && scheduler.Reasons(companion).empty(),
+        "constrained wakes dropped") && ok;
+    ok = Expect(scheduler.TakeObservationRequests(population, 600000).empty(), "constrained owners not reconsidered") &&
+        ok;
+    return Expect(scheduler.TakeObservationRequests(population, 6000000).empty() && scheduler.InFlight() == 0,
+               "constrained owners never woken") && ok;
+}
+
+bool TestProviderFailureBacksOff()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(FiveSquads()));
+    xrSim::FreeplayScheduler scheduler;
+    RequireDecided(scheduler, population, 1, true, 0, 0);
+    scheduler.RequestWake(2, "timer", 0);
+    bool ok = Expect(scheduler.BackoffActive(0) && scheduler.BackoffActive(29999), "failure starts a backoff");
+    ok = Expect(scheduler.TakeObservationRequests(population, 29999).empty(), "nothing handed out during backoff") && ok;
+    ok = Expect(scheduler.State(2) == xrSim::FreeplayWakeState::Queued, "wake kept during backoff") && ok;
+    ok = Expect(!scheduler.BackoffActive(30000), "backoff ends after 30000") && ok;
+    ok = Expect(scheduler.TakeObservationRequests(population, 30000) == OwnerIds{2}, "handed out after backoff") && ok;
+
+    scheduler.OnObservation(2, 30000);
+    scheduler.OnDecision(2, true, 30000);
+    ok = Expect(scheduler.BackoffActive(89999) && !scheduler.BackoffActive(90000), "second failure doubles to 60000") &&
+        ok;
+    RequireDecided(scheduler, population, 3, true, 90000, 90000);
+    ok = Expect(scheduler.BackoffActive(209999) && !scheduler.BackoffActive(210000), "third failure doubles to 120000") &&
+        ok;
+    RequireDecided(scheduler, population, 4, false, 210000, 210000);
+    ok = Expect(!scheduler.BackoffActive(210000), "success clears the backoff") && ok;
+    RequireDecided(scheduler, population, 5, true, 210000, 210000);
+    ok = Expect(scheduler.BackoffActive(239999) && !scheduler.BackoffActive(240000), "success resets to 30000") && ok;
+
+    xrSim::FreeplayPopulation single;
+    RequireSetup(single.Sync(std::string(kGroup500Header) + "member 500 601 sim_default_stalker_1 1\nend\n"));
+    xrSim::FreeplayScheduler capped;
+    uint64_t now = 0;
+    for (int i = 0; i < 6; ++i)
+    {
+        if (i > 0)
+            now += 600000;
+        RequireDecided(capped, single, 1, true, now, now);   // backoffs 30000 .. 480000, then capped
+    }
+    return Expect(capped.BackoffActive(now + 479999) && !capped.BackoffActive(now + 480000),
+               "backoff capped at 480000") && ok;
+}
+
+bool TestObservationTimeoutFreesSlot()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    xrSim::FreeplayScheduler scheduler;
+    scheduler.RequestWake(1, "sighting", 0);
+    scheduler.TakeObservationRequests(population, 0);
+    bool ok = Expect(scheduler.State(1) == xrSim::FreeplayWakeState::AwaitingObservation, "owner awaits observation");
+    ok = Expect(scheduler.TakeTimedOutObservations(9999).empty(), "not timed out before the timeout") && ok;
+    ok = Expect(scheduler.TakeTimedOutObservations(10000) == OwnerIds{1}, "timed out at the timeout") && ok;
+    ok = Expect(scheduler.State(1) == xrSim::FreeplayWakeState::Idle && scheduler.InFlight() == 0,
+        "timed out owner is idle and frees its slot") && ok;
+    return Expect(scheduler.TakeTimedOutObservations(20000).empty(), "timeout reported once") && ok;
+}
+
+bool TestForgetRemovesOwner()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    xrSim::FreeplayScheduler scheduler;
+    scheduler.RequestWake(1, "sighting", 0);
+    scheduler.TakeObservationRequests(population, 0);
+    scheduler.OnObservation(1, 1);
+    bool ok = Expect(scheduler.State(1) == xrSim::FreeplayWakeState::AwaitingDecision && scheduler.InFlight() == 1,
+        "owner awaits decision");
+    scheduler.Forget(1);
+    ok = Expect(scheduler.InFlight() == 0 && scheduler.State(1) == xrSim::FreeplayWakeState::Idle,
+        "forget frees the slot") && ok;
+    scheduler.OnDecision(1, true, 2);
+    ok = Expect(scheduler.State(1) == xrSim::FreeplayWakeState::Idle && scheduler.InFlight() == 0 &&
+            !scheduler.BackoffActive(2) && scheduler.Reasons(1).empty(),
+        "decision after forget is a no-op") && ok;
+
+    scheduler.RequestWake(2, "sighting", 3);
+    RequireSetup(population.Retire(xrSim::FreeplayBinding::Group, 510));
+    ok = Expect(scheduler.TakeObservationRequests(population, 4).empty(), "retired owner not handed out") && ok;
+    return Expect(scheduler.State(2) == xrSim::FreeplayWakeState::Idle && scheduler.Reasons(2).empty(),
+               "retired owner dropped from the scheduler") && ok;
+}
 } // namespace
 
 int main()
@@ -719,5 +934,13 @@ int main()
     ok = TestCoastKeepsObjective() && ok;
     ok = TestStaleAfterSplitRejected() && ok;
     ok = TestLedgerKeepsNewest512() && ok;
+    ok = TestDuplicateWakesCoalesce() && ok;
+    ok = TestConcurrencyBoundAndFairness() && ok;
+    ok = TestMinWakeInterval() && ok;
+    ok = TestPeriodicReconsider() && ok;
+    ok = TestConstrainedOwnersAreNotWoken() && ok;
+    ok = TestProviderFailureBacksOff() && ok;
+    ok = TestObservationTimeoutFreesSlot() && ok;
+    ok = TestForgetRemovesOwner() && ok;
     return ok ? 0 : 1;
 }
