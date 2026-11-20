@@ -31,7 +31,10 @@ static_assert(std::is_same_v<decltype(&OnDebugCallback), GLDEBUGPROC>);
 
 void UpdateVSync()
 {
-    if (psDeviceFlags.test(rsVSync))
+    // -agent_background windows are parked off-screen and unattended. A vsynced swap waits for
+    // display refresh ticks, and while the displays sleep none arrive: SDL's Cocoa swap then
+    // blocks the main thread for good. Background instances present without vsync.
+    if (psDeviceFlags.test(rsVSync) && !AgentBackgroundMode())
     {
         // Try adaptive vsync first
         if (SDL_GL_SetSwapInterval(-1) == -1)
