@@ -176,6 +176,7 @@ The bridge lets a script or agent run, control and screenshot the game. Protocol
 | `-agent_bridge_port <n>` | Windows: TCP port on 127.0.0.1; `0` or absent lets the OS pick. The bound port goes to `<appdata>/agent_bridge.port` |
 | `-agent_background` | Unattended instance: no focus, off-screen, windowed, no audio, no pause on focus loss, no error dialogs |
 | `-agent_sound` | With `-agent_background`: open the audio device anyway (silence it with `snd_volume_eff 0.` / `snd_volume_music 0.` in `user.ltx`); needed for long CoC sessions |
+| `-xrsim_freeplay recorded\|live` | Experimental, branch `feat/freeplay-population-ai`, CoC runtime with the adapter installed by `tools/freeplay_runtime.py`: one AI decision owner per freeplay squad, mutant pack and squadless NPC. `recorded` takes decisions only from `ai.freeplay.decide`; `live` wakes owners through the provider below and **has not been exercised yet**. Status: [PLAN_STATUS](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21) |
 
 `agentctl.py` accepts a Unix socket path, `tcp:HOST:PORT`, an `agent_bridge.port` file, or an appdata directory containing one. `--wait S` retries until the instance is up.
 
@@ -217,6 +218,7 @@ Run a script of verbs: `py tools/agentctl.py <target> --script tools/bridge_soak
 ai.reset | ai.status | ai.observe | ai.wake | ai.inject <tool call> | ai.snapshot | ai.log | ai.replay
 agent.actor.list | agent.actor.observe <kind> | agent.actor.wake <kind> | agent.actor.poll | agent.actor.commands
 agent.pack.spawn <section> <count> [radius_m] | agent.pack.list | agent.pack.observe <id> | agent.pack.wake <id> | agent.pack.commands
+ai.freeplay.mode|begin|sync|retire|event|wake|observe|decide|tick|owners|census|log   (experimental freeplay owners; the CoC adapter calls most of them through xrsim_verb)
 ```
 
 Example: `agent.pack.spawn dog_weak 3 8` spawns three dogs near the actor as one `MutantPackAgent`. Full ALife group ownership comes after this path is stable.
@@ -234,9 +236,11 @@ export XRAY_AGENT_TIMEOUT_MS=5000
 
 Missing curl, keys or network return coast values such as `network_adapter_not_linked` or `missing_api_key`; they are never fatal.
 
+Experimental freeplay live mode (`-xrsim_freeplay live`, see the options table) uses the same `XRAY_AGENT_PROVIDER`, `XRAY_AGENT_MODEL` and `ANTHROPIC_API_KEY` (or `XRAY_AGENT_API_KEY`). It refuses to start without them (`provider_disabled`, `missing_api_key`, `transport_unavailable`) and has not been run with a model yet; only recorded mode has live evidence.
+
 ## Tests and Verification
 
-- Standalone xrSim tests (any platform, no engine build): `cmake -S tools/xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-xrsim`, then run `xrSimAuthoritySpineTests` and `xrSimWorldStateTests`.
+- Standalone xrSim tests (any platform, no engine build): `cmake -S tools/xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-xrsim`, then run `xrSimAuthoritySpineTests`, `xrSimWorldStateTests` and (on the freeplay branch) `xrSimFreeplayTests`; `tools/xrsim_standalone/build_and_test.sh` does all of it on macOS/Linux. Freeplay tool tests: `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe`.
 - CMake focused targets (`EXCLUDE_FROM_ALL`, build by name): `xrSimWorldStateTests`, `xrSimAuthoritySpineTests`, `xrUIShaderCacheTests`, `xrFrameTimeCollectorTests`, `xrFrameTimeCollectorBoundaryTests`, `xrFrameTimeSessionTests`, `xrMainMenuReloadTests`.
 - Python tooling: `py -m unittest tools.tests.test_agentctl`. Some other `tools/tests` cases exercise macOS-only behaviour (AF_UNIX, Mach-O) and fail on Windows.
 - Regression gate before merging engine changes: a private-save bridge scenario covering movement, save/load, UI and quit, run in background instances.
@@ -259,6 +263,7 @@ rg -n "FATAL|SCRIPT RUNTIME ERROR|no static|already at graph vertex|not found at
 - CoC 1.4.22 has a stock campfire-story bug that is fatal on every engine, including the original CoC engine: `sound_theme.script` defaults an `npc` theme's `shuffle` to `"rand"`, which its `select_next_sound` does not handle, and 45 `strange_story_*` npc themes have no `shuffle`, so a story told by an online camp aborts at `sound_theme.script:206` (`played_id` nil). It affects an ordinary play folder too. On macOS (2026-11-21) it ended 11 of 15 Task 6 background launches near the Rookie village, all with `-agent_sound` (2 of them without the freeplay adapter); the Task 5 background runs without `-agent_sound` crashed the same way after about 100–150 s of play. Mitigation (`f9e134340`): `tools/freeplay_runtime.py` writes a generated config override with `shuffle = rnd` for those sections into a runtime's `gamedata/` (`clone` always does; for your own runtime run `python3 tools/freeplay_runtime.py install --runtime <runtime> --fix-story-themes`, which also copies the adapter script, inactive without `-xrsim_freeplay`). The stock script is not modified. With the override, two 511 s runs and the regression gate passed. Evidence: `docs/PLAN_STATUS.md` (Freeplay population AI).
 - With `-agent_sound`, the log can show `! [LUA]  Playing sound is not completed, but is destroying "<sound>"!` with a stack dump. It is an engine warning from the script sound destructor, not a Lua error.
 - macOS `-agent_background` instances render while their window is occluded since `4f6044610`; this was shown only with the Mac locked and the displays asleep.
+- On branch `feat/freeplay-population-ai`, `-agent_background` instances present without vsync (`d1d7a0877`), so frame-time captures taken in background mode are not vsync-paced.
 - Fullscreen resolution changes on Windows are not yet verified after the viewport fix.
 
 ## Repository Layout

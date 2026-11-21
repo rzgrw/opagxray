@@ -153,87 +153,129 @@ The frozen transfer WIP (`8cf2af572` from `archive/transfer/windows-2026-11-07`)
 
 ## Freeplay population AI — 2026-11-21
 
-On 2026-11-21 the user decided to run this AI work ahead of the GL stability comparison. Branch `feat/freeplay-population-ai` (local, not pushed), plan and briefs in `.superpowers/sdd/2026-11-20-freeplay-population-ai/`. Commits: owner registry `4a6da9f65`/`3cedf8c0a`, decision validation `e3efa4ef2`, wake scheduler `1f33b2a7c`, `ai.freeplay.*` verbs and `xrsim_verb` `15fe1cd39`/`a3975d324`, CoC adapter and runtime clone tool `4f93352ed`, adapter fixes `fe0fd47ab`/`b5520741d`/`faafd08f3`/`a718747f6`, sighting ledger `4ad065110`, the Task 6 probe `894c7f83b`, follow-up F1 `f9e134340`/`8eebbd046`/`4f6044610` (below), and the follow-up F2 docs commit that updates this section. Everything below is a **macOS** run (arm64, CMake build); the Windows build of the new sources (`xrSimFreeplay*`, `xrSim_script.cpp`, which are listed in the vcxproj) is unverified.
+On 2026-11-21 the user chose to run this AI work ahead of the GL stability comparison. Every stalker and mutant in CoC freeplay gets one AI decision owner: a squad, a mutant pack, or a squadless NPC. Branch `feat/freeplay-population-ai` (local, not pushed); plan, briefs, round reports and the coordinator's ledger are in `.superpowers/sdd/2026-11-20-freeplay-population-ai/`. Evidence is in `artifacts/freeplay-ai/2026-11-cordon/` (git-ignored, kept locally; its README indexes every round and marks superseded runs). Everything here is a **macOS** run (arm64, CMake build, private runtime `build/runtime/freeplay-ai-2` cloned from a CoC 1.4.22 play folder). No model has made a live decision: every decision so far was a recorded one sent through the bridge.
 
-Engine changes made for background testing in Task 5:
-- `121d5b5ec`: the NPC sound player does nothing when sound is disabled. Without this, the null `CSound` write in `CSoundPlayer::play` crashed `-nosound`/`-agent_background` in game.
-- `d1d7a0877`: background instances present without vsync (swap interval 0 under `AgentBackgroundMode()`). Frame-time captures taken with `-agent_background` are therefore not vsync-paced.
-- `f21294dd4`: `-agent_sound` keeps the audio device open in background mode. The cloned runtime sets game volumes to 0.
+### What is on the branch
 
-Stock CoC crash at `sound_theme.script:206` (`played_id` nil), fatal:
-- Root cause (`.superpowers/sdd/2026-11-20-freeplay-population-ai/debug-sound-theme-report.md`): stock CoC 1.4.22 `npc_sound` defaults `shuffle` to `"rand"`, which `select_next_sound` does not handle; 45 of the 52 `strange_story_*` themes in `configs/misc/sound/script_sound_story_and_music.ltx` are `npc` themes without `shuffle`. The original CoC engine aborts at the same line, so this is a stock bug on every engine, and it affects an ordinary play folder as well as test runtimes. It fires when an online camp tells a story.
-- Without `-agent_sound` it ended each Task 5 fix-3 background run after about 100–150 s (`task-5-live/fix3-*`, one of them without `-xrsim_freeplay`). With `-agent_sound` it ended 11 of the 15 Task 6 launches (all with `-agent_sound`; 2 without `-xrsim_freeplay`; `artifacts/freeplay-ai/2026-11-cordon/crashes/`, `step8/`).
-- Mitigation `f9e134340`: `tools/freeplay_runtime.py` generates a loose config override that adds `shuffle = rnd` to those 45 sections, from the runtime's own `configs.db` (`clone` always; `install --fix-story-themes` on request). The stock script is untouched and no CoC content is in the repo. For your own runtime: `python3 tools/freeplay_runtime.py install --runtime <runtime> --fix-story-themes` (it also copies the adapter script, which stays off unless the game is launched with `-xrsim_freeplay`). Live check: all 52 `strange_story_*` themes report `rnd` (F1 report).
+`git log --oneline dev..HEAD`:
+- Engine (`src/xrEngine/xrSim/xrSimFreeplay*`): owner registry `4a6da9f65`, with reused IDs never inheriting a previous mind `3cedf8c0a`; decision validation against the observed sites and the 512-entry decision ledger `e3efa4ef2`; fair bounded wake scheduler `1f33b2a7c`; `ai.freeplay.*` bridge verbs and the `xrsim_verb` Lua entry point `15fe1cd39`; provider coasts become holds with backoff `a3975d324`; sighting wakes without a ledger line `4ad065110`; a blocked destination reverts the objective `8eebbd046`.
+- CoC adapter `res/coc/gamedata/scripts/xrsim_freeplay.script` and the runtime clone tool `tools/freeplay_runtime.py` `4f93352ed`; adapter fixes `fe0fd47ab` (log through `log1`), `b5520741d` (release squads on switch-off), `faafd08f3` and `a718747f6` (sighting damping, actor level only; silent clones); steering through stock target selection `1252f3854` and `6cbcfd460` (below).
+- Probe `tools/freeplay_probe.py` (`census`, `move`) `894c7f83b`; story-theme config override in `tools/freeplay_runtime.py` `f9e134340`.
+- Engine changes for background testing: `121d5b5ec`, `d1d7a0877`, `f21294dd4`, `4f6044610` (below). Docs `2b4626437` and this update.
 
-Adapter behaviour to keep in mind: a `hold` keeps a squad on its already assigned smart, so a holding squad may still be finishing travel it had started (including toward another level).
+Launch: `-xrsim_freeplay recorded` (decisions only through `ai.freeplay.decide`) or `-xrsim_freeplay live` (provider wakes; not yet run). Without the flag the adapter script loads and registers nothing.
 
-Tests: `python3 -m unittest tools.tests.test_freeplay_probe tools.tests.test_freeplay_runtime` → 15 tests OK (7 probe, 8 runtime). `tools/xrsim_standalone/build_and_test.sh` (Tasks 1–5) was not rerun in Task 6. Evidence: `artifacts/freeplay-ai/2026-11-cordon/` (git-ignored, kept locally; see its README).
+Tests at `6cbcfd460` (`artifacts/.../followup-f4/tests-*.txt`): `tools/xrsim_standalone/build_and_test.sh` builds and runs `xrSimWorldStateTests`, `xrSimAuthoritySpineTests` and `xrSimFreeplayTests`, all exit 0 (76, 14 and 47 test functions called from `main`; the freeplay file is new on the branch). `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe` → 24 tests OK. The Windows build of the new sources (`xrSimFreeplay*`, `xrSim_script.cpp`, listed in the vcxproj) is unverified.
 
-- **Census (Step 5): passed.** `tools/freeplay_probe.py census`, exit 0. Results:
-  - l01_escape: `npcs=96 owners=50 transferable=46 script_owned=4 unbound=0`.
-  - All linked levels: `npcs=383 owners=195 transferable=182 script_owned=13 unbound=0`.
-  - All four owner kinds are transferable on l01_escape.
-  - The 13 script-owned squads are listed in the evidence README: 4 at Cordon, 9 at the Marsh base and doctor, one of them `random`.
-  - No companions exist in the save.
-  - Sidorovich and the Forester are `script_trader` objects that the adapter does not enroll at all. This is a missing binding.
-- **Recorded moves (Step 6): partly shown.** In each run below, the recorded `move_to` replaced the squad's stock destination and the squad arrived (exit 0):
-  - offline pack 349: run A to 4_11 (~560 m away, 234 s);
-  - squad 357, online from 51.0 s after the probe started: turned back from its off-level stock target into the Rookie village, 326 s;
-  - offline lone stalker 233: 97 s;
-  - lone mutant 110: 56 s.
-  - Pack 349 run B to 5_4 also exited 0, but it replaced nothing: 5_4 was the pack's stock smart at decide time and the pack stayed 0.24 m from it (`step6/pack-offline-B/track.json`). So the pair ends at different smarts only because run B was a no-op arrival. Each observation offered only the current smart plus one other (measured in F2 Part 1 below).
-  - Not shown:
-    - the squad pair's run B (the game crashed in the stock bug about 15 s after the decide; rerun in F2 case 1);
-    - the online pack run (boar 238: destination switched at once, but no `arrived` event in 900 s; final distance 129 m; rerun in F2 case 2).
-- **Membership (Step 7):**
-  - **Leader loss: passed.** The same owner id was kept, `mrev` went 1→2, the objective was kept, and the squad arrived.
-  - **Split: passed.** The decision returned `stale_membership`, and the moved NPC's census line shows the destination squad's owner. Both squads were `hold:-`, so the objective part does not tell them apart. Stock scripts accepted `unregister_member`/`register_member`.
-  - **A lone owner joining a group: not exercised separately** (done in F2 case 4).
-  - **Blocked destination:**
-    - With the brief's `disabled = true` it was **not** blocked, because CoC's `target_precondition` ignores `disabled`.
-    - With `respawn_only_smart = true` it **passed**: a `blocked` ledger line, the squad kept its previous target, and the owner was queued again. In that build the engine objective stayed at the blocked site; `8eebbd046` (F1) now reverts it (live in F2 case 3).
-  - Step 7 ran with the actor moved away from the village camp and `g_god on`, to get past the stock crash.
-- **Regression gate (Step 8): not passed in Task 6.** Both stock (no-flag) attempts crashed in the stock `sound_theme` bug before the scenario began, so movement, save/load, inventory, menu and quit were not exercised; the adapter was not enabled (no `-xrsim_freeplay`). Passed in F1 (below).
-- Environment: from the third launch on, the off-screen window was occluded. The device reported lost, nothing rendered, and the load screen stayed (`precache=60`) while the simulation ran. Screenshots and input were not checked in those runs. Fixed for background instances in `4f6044610` (F1).
-- No live model decisions were made; that is Task 7.
+### How the adapter steers squads
 
-### Follow-up F1 — 2026-11-21
+At activation the adapter wraps the stock target selection, `sim_board.simulation_board.get_squad_target`, at the class level. For a held squad (writer `sim`, enrolled, with an objective) the wrapper answers the objective's smart. Every other call goes to the stock function with its arguments. A new objective revision resets the squad's `current_action` and `__lock` once, so stock asks for a target at the squad's next update, even mid-travel. A smart that fails stock's keep-target check (`target_precondition(squad, true)`) sends one `blocked` event per revision; the wrapper then answers nil, and stock's no-target path holds the squad in place until a new objective arrives. A Lua error or `ai.freeplay.mode off` restores the stock function and clears the locks the adapter caused. The observation's site list is the current smart first, then smarts on any level that pass the stock precondition and are not locked, nearest first, at most 8; `distance_m` is stock's game-graph distance (`simulation_objects.sim_dist_to`).
 
-Runtime `build/runtime/freeplay-ai-2` (fresh clone), every launch `-agent_background -agent_sound`, Mac locked with both displays asleep. Evidence: `artifacts/freeplay-ai/2026-11-cordon/followup-f1/`; report `.superpowers/sdd/2026-11-20-freeplay-population-ai/followup-f1-report.md`.
-- `f9e134340`: the story-theme override above. `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe` → 24 tests OK (`a-green.txt`).
-- `4f6044610`: on macOS, `-agent_background` instances render while their window is occluded (`CHW::GetDeviceState` returns Normal for them before the occlusion check; hidden/minimized still Lost). Shown only with the Mac locked and displays asleep: about 50 minutes over 6 launches, no wedge, every launch quit normally (`b-fix-load.txt`, `b-fix-capture.csv`). Other power states (lid closed, displays awake) are untested.
-- `8eebbd046`: a `blocked` event for the owner's current objective site reverts the objective to the one in force before the last committed decision, with `source=hold` (or `hold:-` when there is none). Unit tests in `xrSimFreeplayTests.cpp` (`c-red.txt`, `c-green.txt`); live in F2 case 3.
-- Runs, all at `cordon_start`:
-  - two 511 s runs without `-xrsim_freeplay`: alive throughout, exit 0, no `sound_theme` error (`d1-run1-*`, `d1-run2-*`);
-  - **regression gate passed**: movement, look, sprint/jump/crouch, save, load, inventory, menu and quit, 45 requests, `failures=0`, screenshots rendered (`d2-transcript.txt`, `d2_regression_driver.py`);
-  - one 361 s `-xrsim_freeplay recorded` run: alive, exit 0, no adapter warning (`d3-*`).
-- The log of the first 511 s run (3×) and of the gate (1×) contains `! [LUA]  Playing sound is not completed, but is destroying "<sound>"!` with a stack dump (`d1-run1-log-scan.txt`, `d2-log-scan.txt`). This is the engine's `CScriptSound` destructor warning, not a Lua error: no `lua_pcall_failed`, the script keeps running.
-- These runs show no abort over about 17 minutes beside the Rookie-village camp; they do not show that a story was told.
+**Deviation from the written plan: the `scripted_target` mechanism was replaced.** Up to F2 the adapter held squads by writing `scripted_target`. Stock CoC treats such a squad as story-scripted: `sim_board.script` and `smart_terrain.script` leave it out of smart populations, and `get_script_target()` changes task status, reach rules and dynamic tasks. F2 measured the effect: after a jump to 22:00 every Cordon smart read population 0 with 0–8 squads registered; the same jump without the flag kept the counts (`followup-f2/sites/t2-populations.txt`, `noflag-t*-populations.txt`). F3 verified the replacement:
+- 0 squads with `scripted_target` in recorded and no-flag play (`followup-f3/rec-step1-scripted-targets.txt`, `noflag-step1-scripted-targets.txt`);
+- populations equal the counted squads on all 20 Cordon smarts before and after the same jump (`rec-pop-t*.txt`);
+- hand-back on `mode off` (`fix1-modeoff.txt`, `fix1b-handback.txt`);
+- no looping squads across the 19:00 day/night switch: 0 in 13 samples, 7 `blocked` lines, one per owner (`fix1-soak-samples.txt`, `fix1-night-check.json`).
 
-### Follow-up F2 — 2026-11-21
+Other deviations from the plan, each ruled in the ledger:
+- The adapter logs through `log1`; CoC's `printf` is silent unless `lua_debug` is on.
+- `-agent_sound` was added for background runs (engine section below).
+- Sighting events come only from `sim` squads on the actor's level. They re-arm beyond 225 m, have a 300 s per-pair cooldown and write no ledger line of their own; the reason appears on the decision line.
+- Recorded mode frees the scheduler slot at `observe`.
+- A provider-originated coast is a hold with backoff.
+- A `blocked` event for the current objective site reverts the objective to the previous one with `source=hold`.
+- A held squad whose smart is infeasible holds in place instead of taking a stock destination. During a provider outage such squads stand still until their owner decides.
 
-Same runtime and binary (`4f6044610`), every launch `-agent_background -agent_sound`, recorded mode unless noted; no engine or adapter change. Evidence: `artifacts/freeplay-ai/2026-11-cordon/followup-f2/` (see the evidence README); report `.superpowers/sdd/2026-11-20-freeplay-population-ai/followup-f2-report.md`. Log scans of every launch: no `lua_pcall_failed`, FATAL or `sound_theme` error.
+### Engine changes for background testing
 
-- **Sites on offer (Part 1, `followup-f2/sites/`).** Each transferable `l01_escape` owner was woken and, as soon as its observation was stored, every Cordon smart (20) was classified with a Lua copy of stock `se_smart_terrain:target_precondition`, matched against the real call for every pair.
-  - At game time 08:01 (50 owners), sites besides the current smart, min/median/max: squad 0/0/1 (18 owners; 13 had none), pack 2/3/3, lone stalker 0/1/1, lone mutant 2/3/3. The owners' `sites=` matched the raw count for every owner.
-  - Rejections over 950 owner–smart pairs at 08:01: population at `max_population` 622 (13 of 20 smarts full), faction not accepted by the smart's `props` 253, stalker `resource`/`territory` time window 6; 69 passed. `respawn_only_smart`, missing `props` and surge: 0. `disabled`, actor level and simulation activities are not checked by this function.
-  - After advancing game time to 22:00 with `level.change_game_time` (59 owners at 22:09): squad 0/2/3, pack 9/10/11, lone stalker 1/1/3, lone mutant 9/10/10; listed after `MAX_SITES = 8` (current smart included): pack 7/7/8, lone mutant 7/7/8 (31 owners trimmed). Rejections over 1121 pairs: faction 724, population 33, stalker `base` time window 23; 341 passed.
-  - Adapter vs raw: the same-level filter removed 1–4 passing off-level smarts for 18 of 50 owners at 08:01; the current smart is always listed, also when it fails its own precondition (28 owners) or is on another level (5 owners).
-  - Population accounting: stock CoC counts only squads without a script target toward a smart's population, and the adapter sets `scripted_target` on every squad it holds. After the time jump every Cordon smart read population 0 with 0–8 squads registered (`t2-populations.txt`); the same jump without the flag kept the counts (`noflag-t*-populations.txt`). Without any jump, after about 15 minutes `esc_smart_terrain_2_12` read 0/6 with 8 squads (`c234-end-populations.txt`). The 22:09 numbers therefore mix time of day with this undercount.
-- **Reruns (Part 2).**
-  - Squad 357 run B: the observation listed only run A's site (`esc_smart_terrain_2_12`) and the squad's own off-level stock target `mar_smart_terrain_base`. Sent there, online at decide, the squad crossed Cordon→Marsh offline and **arrived** (leader 0.2 m, 818 s). This is a no-op for the destination, so the squad pair still has no B site that differs from both A and the stock target (`case1-squad-B/`).
-  - Online boar pack 238 → `esc_smart_terrain_4_11`, nothing changed (actor at `cordon_start`, 122–177 m away, switch distance 250): **arrived** (leader 42 m, 457 s). No member ever had the actor as enemy; the members took a stalker as enemy about 420 s after the decide, shortly before arrival (`case2-pack-online-diag/`). Task 6's non-arrival of the same pack (a member died, no enemy trace) is not explained.
-  - Blocked destination, live: pack 238 at `move_to:esc_smart_terrain_4_11` decided `move_to esc_smart_terrain_5_12` with `respawn_only_smart = true` set right after the decide → ledger `wakeReason=blocked site=esc_smart_terrain_5_12`, owner `state=queued objective=move_to:esc_smart_terrain_4_11 source=hold rev=3`, `scripted_target` stayed `esc_smart_terrain_4_11`. **Passed**; flag reset (`case3-blocked/`).
-  - A lone owner joining a group: two `SIMBOARD:create_squad` squads at `esc_smart_terrain_1_11`; one cut to a single member (`kind=lone_stalker`, `stay:esc_smart_terrain_2_12`), the other given `move_to:mar_smart_terrain_base`; the last member moved across. Its census line shows the group's owner and `objective=move_to:mar_smart_terrain_base`, and the emptied owner is retired (absent from `ai.freeplay.owners`; stock removed the squad). **Passed** (`case4-join/join.txt`).
+- `121d5b5ec`: the NPC sound player does nothing when sound is disabled. Without it, `-nosound` and `-agent_background` crashed in game on a null `CSound` in `CSoundPlayer::play`.
+- `d1d7a0877`: background instances present without vsync (swap interval 0 under `-agent_background`). Frame-time captures taken with `-agent_background` are therefore not vsync-paced.
+- `f21294dd4`: `-agent_sound` keeps the audio device open in background mode. Cloned runtimes set both volumes to 0.
+- `4f6044610`: on macOS, `-agent_background` instances render while their window is occluded; hidden or minimized windows still report the device lost. Shown only with the Mac locked and both displays asleep: about 50 minutes over 6 launches (`followup-f1/b-fix-*`). Other power states are untested.
 
-Still open after F2:
-- save persistence of owners and objectives, and the saved activation setting;
-- the Cordon–Garbage crossing (F2 shows one Cordon→Marsh crossing only), and Zone-wide checks beyond Cordon;
-- companion order persistence (no companion squads exist in `cordon_start`);
-- `script_trader` NPCs (Sidorovich, the Forester) are not enrolled;
-- an online `move_to` whose site differs from both an earlier run and the stock target (Cordon offers none to squads at load);
-- the cause of Task 6's online-pack non-arrival;
-- the population undercount under the adapter (above), which changes what stock `max_population` limits;
-- the Windows build of the new sources (`xrSimFreeplay*`, `xrSim_script.cpp`);
-- `4f6044610` in power states other than locked with displays asleep;
-- autonomous model wakes (Task 7), waiting on a model ID and API key from the user.
+### Stock campfire-story crash
+
+- **Root cause** (`debug-sound-theme-report.md`): CoC 1.4.22 `sound_theme.script` defaults an `npc` theme's `shuffle` to `"rand"`, which `select_next_sound` does not handle. 45 `strange_story_*` npc themes in `configs/misc/sound/script_sound_story_and_music.ltx` have no `shuffle`, so a story told by an online camp aborts at `sound_theme.script:206` (`played_id` nil).
+- **Scope.** The original CoC engine aborts at the same line. This is a stock bug on every engine, and an ordinary play folder has it too.
+- **Where it hit.** Without `-agent_sound` it ended each Task 5 fix-3 background run after about 100–150 s (`task-5-live/fix3-*`, one of them without `-xrsim_freeplay`). With `-agent_sound` it ended 11 of the 15 Task 6 launches, all of which used `-agent_sound` (`crashes/`, `step8/`).
+- **Mitigation `f9e134340`.** `tools/freeplay_runtime.py` generates a loose config override from the runtime's own `configs.db` that adds `shuffle = rnd` to those 45 sections. `clone` always applies it. For your own runtime: `python3 tools/freeplay_runtime.py install --runtime <runtime> --fix-story-themes`. This also copies the adapter script, which stays inactive without `-xrsim_freeplay`. The stock script is untouched and no CoC content is in the repo.
+- **Since the override.** F1–F4 launches beside the Rookie village had no `sound_theme` abort (`followup-f1/d1-*`, `followup-f4/logs-scan.txt`).
+
+### Evidence
+
+**Current (F4, adapter `6cbcfd460`, engine binary `4f6044610`; `followup-f4/`, report `followup-f4-report.md`).** All launches used recorded mode at `cordon_start` with time factor 10 and no spawning. Actor teleports and `g_god on` are disclosed per run in the evidence README.
+- **Census: passed.** About 25 s after load: l01_escape `npcs=96 owners=50 transferable=46 script_owned=4 unbound=0`; all levels `383/195/182/13/0`. The 13 script-owned squads are the same as in Task 6 (`census-l01/`, `census-all/`).
+- **Squad A/B pair (offline): passed.** Squad `bandit_sim_squad_novice20199`, current smart and stock-assigned target `5_9`, stock pick `gar_smart_terrain_3_5`. A: `esc_smart_terrain_7_11`, arrived in 91.5 s (`L1/squad-offline-A`). B, in a fresh launch: `mar_smart_terrain_6_11`, arrived in 441.8 s after crossing to k00_marsh (`L3/squad-offline-B`).
+- **Pack A/B pair (online): A passed, B not shown.** Pack `simulation_boar20306`.
+  - A: online at decide, offline from about 442 s; `esc_smart_terrain_4_11` arrived in 457.1 s (`L2/pack-online-A`). A equals what the stock function would have picked at that moment.
+  - First B attempt (`L3/pack-online-B`): stock counted the pack as arrived 5 s after the switch, because it shared the smart's game-graph vertex. The leader was 163.8 m away, so the probe exited 1.
+  - Second B attempt (`L4b/pack-online-B2`): the pack switched to `9_7`, and all three members died.
+  - Online mutants walked at about 0.25 m/s. Two further online mutant runs died near the Rookie village (`L1/`).
+- **Single moves: passed.** Lone stalker `7_11` in 81.3 s (`L2/lone-stalker`). Lone mutant `4_11` in 106.8 s, offline, on the third attempt: the first died near the village and the second stalled online in a fight (`L1/`, `L2/`, `L3/lone-mutant-retry`).
+- **Off-level move.**
+  - Cordon→Marsh: arrived (squad pair B above).
+  - Cordon→Darkscape (`ds2_lager_st`): **not shown** (`L2/offlevel`). After a fight, the offline squad cycled through the same three Cordon positions with a period of about 5 minutes for more than 20 minutes. Target selection was not called in that time, so the loop is in offline travel. Not diagnosed.
+- **Leader loss: passed.** Pack `simulation_mix_dogs21602`: commander removed 30 s after the decide. Same owner 441, `mrev` 1→2, members 3→2, objective kept, arrived in 103.6 s (`L2/leader-loss`).
+- **Save and load: no crash, but the decision is lost.** A squad travelling to `mar_smart_terrain_6_11` was saved (`saveload/`). Both a same-process load and a fresh-launch load had no crash, no Lua error and no `! xrsim_freeplay` line. The adapter re-activated (epoch 2 in the same process), the stock function was wrapped exactly once, the 13 non-held squads got the stock answer, and the census was complete. The decision did not survive: stock saves neither `assigned_target_id` nor `current_action`, so on load stock picked `esc_smart_terrain_1_11` and the adapter enrolled the squad as a new owner holding there.
+- **10-minute recorded soak: passed** (`L6-*`). No crash, no Lua error, no `! xrsim_freeplay` line; census `381/193/180/13/0`. Every Cordon smart was at or below its maximum, with population equal to the counted squads.
+- **Crash.** One launch (L4) vanished before any decision, in a stock `xr_danger` → `accessible_nearest` path (`L4-crash-excerpt.txt`). Not adapter-related as far as the trace shows; retried once.
+
+**Superseded.** These were taken with the old `scripted_target` mechanism:
+- Task 6 Step 6 moves (`step6/`);
+- Task 6 leader loss and blocked runs (`step7/`);
+- F2 Part 2 cases 1–3 (`followup-f2/case1-3*`).
+The Task 6 census numbers are reproduced unchanged by F4.
+
+**Membership cases and the round that showed each:**
+- **leader loss:** F4 (current; Task 6 earlier with the old mechanism);
+- **split with a stale decision:** Task 6 Step 7. The decision returned `stale_membership` and the moved NPC took the destination squad's owner (`step7/split-join.txt`). This is registry behaviour and still valid.
+- **lone owner joining a group:** F2 case 4 (`followup-f2/case4-join/join.txt`). Also registry behaviour, still valid.
+- **blocked destination:** Task 6 (`respawn_only_smart`; `disabled = true` does not block in CoC). Live revert in F2 case 3 (old mechanism) and F3 `blocked-499*` (current mechanism). Infeasible smart held in place in F3 `fix1-*`.
+
+**Regression gate and soaks.**
+- **F1 gate: passed** without the adapter flag, binary `4f6044610`. It covered movement, look, sprint/jump/crouch, save, load, inventory, menu and quit: 45 requests, `failures=0` (`followup-f1/d2-transcript.txt`). It also had two 511 s no-flag runs and one 361 s recorded run with the old adapter.
+- **Changes since F1:** only the adapter (`1252f3854`, `6cbcfd460`) and docs. The gate was not rerun.
+- **Recorded soaks with the new adapter:** 46 min (`1252f3854`, `followup-f3/rec-*`), 12.5 min (`6cbcfd460`, `fix1-*`) and F4's 10 min. All were clean.
+
+### Destination choice
+
+- **At load (F2, game 08:01, `followup-f2/sites/t1.json`).** This counts sites besides the current smart, before off-level sites were offered. A Cordon stalker squad had 0/0/1 (min/median/max; 13 of 18 had none), packs 2/3/3, lone stalkers 0/1/1 and lone mutants 2/3/3. Of 950 owner–smart pairs, 622 were rejected at `max_population` (13 of 20 smarts were full), 253 for faction and 6 for time of day.
+- **With the cross-level list (F3, about 8 min after load, `followup-f3/sites-t1.json`).** This counts total sites including the current smart: squads 1/3/6, packs 1/4/5, lone stalkers 4/5.5/6, lone mutants 2/4/5. The off-level sites offered are Marsh, Garbage and Darkscape smarts. No owner reached the cap of 8.
+- **Pack timing (F4).** A pack's list at load held only its stock smart and `4_11`. `8_10` and `9_7` appeared after about 50 game minutes (`followup-f4/L*-pack349-sites-poll.txt`).
+
+### Open
+
+**From this round:**
+- the pack pair's B run;
+- the Cordon→Darkscape offline loop;
+- `distance_m` is graph distance, not metres (sightings stay in metres).
+
+**Persistence and enrolment:**
+- objectives and owner identities are not saved: a load re-bootstraps every owner, and a travelling squad's decision is lost (F4);
+- no saved activation setting: activation is the launch flag only;
+- companion order persistence is untested: no companions exist in `cordon_start`;
+- Sidorovich and the Forester are not enrolled (trader objects).
+
+**Coverage:**
+- the Cordon–Garbage crossing and Zone-wide checks beyond Cordon;
+- autonomous model wakes (Task 7), waiting on a model ID and API key from the user;
+- `-keep_lua`: the double-wrap guard is only code-read and checked through `lua`; a `-keep_lua` session was not exercised;
+- the Windows build of the new sources;
+- `4f6044610` in power states other than locked with displays asleep.
+
+**Known behaviour to watch:**
+- respawned squads held at their spawn smart can leave a smart over its maximum population (F3: `8_10` and `8_9` at 3/2; F4's soak had none);
+- during a provider outage, squads with no feasible smart stand still;
+- stock "help the actor" (`get_help_target_id`) remains a second, stock destination writer.
+
+**Deferred minor review items (ledger):**
+- registry edge cases: dissolving group objectives, `:` in site names, linear owner lookups;
+- prompt and line escaping, plus duplicated parse helpers that could collide in unity builds on other configurations;
+- scheduler timeout and requeue paths without tests;
+- in live mode a `decide` and a pending reply can both commit;
+- probe robustness: silent fallbacks, untested branches;
+- clone-tool hardening: symlinks, atomic writes, CRLF in `user.ltx`;
+- the wrapper ignores `smart.locked` for stay/move targets;
+- observation cost per wake;
+- a resumed ex-companion objective gets no reset;
+- the module-teardown join of the provider worker on quit.
