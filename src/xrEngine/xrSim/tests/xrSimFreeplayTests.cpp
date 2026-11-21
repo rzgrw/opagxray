@@ -1188,6 +1188,57 @@ bool TestBlockedEventRewakesOwner()
     return Expect(size_t(std::count(after.begin(), after.end(), '\n')) == lines, "refused event writes nothing") && ok;
 }
 
+// Owner 1 starts on its bootstrap (move_to esc_smart_b, rev 1) and takes a recorded move to esc_smart_c (rev 2).
+void DecideMoveToC()
+{
+    StartFreeplay("recorded");
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    RequireVerb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    RequireVerb("ai.freeplay.tick", "1");
+}
+
+// The last feasible plan: a blocked destination reverts to the objective in force before the decision.
+bool TestBlockedObjectiveRevertsToPrevious()
+{
+    DecideMoveToC();
+    bool ok = Expect(Verb("ai.freeplay.event", "500 blocked esc_smart_c").text == "queued", "blocked event queues");
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 "),
+        ("blocked objective reverts to the previous one: " + OwnerLine(1)).c_str()) && ok;
+    const std::string tick = RequireVerb("ai.freeplay.tick", "2");
+    ok = Expect(Contains(tick, "apply 1 500 3 move_to esc_smart_b hold\n"), ("reverted objective applied: " + tick).c_str()) &&
+        ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.log"), "wakeReason=blocked source=event verdict=event verb=- "
+                                                         "site=esc_smart_c"),
+        "blocked event still logged") && ok;
+    ok = Expect(Contains(OwnerLine(1), "state=queued "), "blocked owner still woken") && ok;
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_b");
+    return Expect(Contains(OwnerLine(1), "objective=hold:- source=hold rev=4 "),
+               ("a reverted objective that is blocked too falls back to hold: " + OwnerLine(1)).c_str()) && ok;
+}
+
+bool TestBlockedOtherSiteKeepsObjective()
+{
+    DecideMoveToC();
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_a");
+    bool ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_c source=recorded rev=2 "),
+        ("blocked other site changes nothing: " + OwnerLine(1)).c_str());
+    ok = Expect(!Contains(RequireVerb("ai.freeplay.tick", "2"), "apply 1 "), "nothing to apply") && ok;
+    RequireVerb("ai.freeplay.event", "500 arrived esc_smart_c");
+    return Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_c source=recorded rev=2 "),
+               "arrived changes no objective") && ok;
+}
+
+bool TestBlockedWithoutPreviousObjectiveHolds()
+{
+    StartFreeplay("recorded");
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_b");
+    bool ok = Expect(Contains(OwnerLine(1), "objective=hold:- source=hold rev=2 "),
+        ("blocked bootstrap without an earlier objective holds: " + OwnerLine(1)).c_str());
+    return Expect(Contains(RequireVerb("ai.freeplay.tick", "1"), "apply 1 500 2 hold - hold\n"), "hold applied") && ok;
+}
+
 // A sighting only requests a wake: it writes no ledger line of its own, and its reason shows on
 // the owner's next decision line instead.
 bool TestSightingEventWakesWithoutLedger()
@@ -1313,6 +1364,9 @@ int main()
     ok = TestModelCoastIsKept() && ok;
     ok = TestLiveModeRefusedWithoutProvider() && ok;
     ok = TestBlockedEventRewakesOwner() && ok;
+    ok = TestBlockedObjectiveRevertsToPrevious() && ok;
+    ok = TestBlockedOtherSiteKeepsObjective() && ok;
+    ok = TestBlockedWithoutPreviousObjectiveHolds() && ok;
     ok = TestSightingEventWakesWithoutLedger() && ok;
     ok = TestModeOffEmitsNothing() && ok;
     ok = TestResetClearsFreeplay() && ok;

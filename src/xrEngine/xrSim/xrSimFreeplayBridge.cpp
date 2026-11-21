@@ -55,6 +55,7 @@ struct FreeplayRuntime
     std::vector<uint64_t> abandoned;              // requests of retired owners: drained, then dropped
     std::set<uint64_t> knownOwners;               // owners that already had their spawn wake
     std::map<uint64_t, uint32_t> appliedRevision; // objective revision of the last apply line per owner
+    std::map<uint64_t, FreeplayObjective> previousObjective; // in force before the owner's last committed decision
 };
 
 FreeplayRuntime g_freeplay;
@@ -182,9 +183,12 @@ std::string ApplyVerdict(uint64_t ownerId, const FreeplayVerdict& verdict, Freep
         return verdict.reason;
     if (verdict.keep)
         return "kept";
+    const FreeplayOwner* owner = g_freeplay.population.FindOwner(ownerId);
+    const FreeplayObjective previous = owner != nullptr ? owner->objective : FreeplayObjective();
     const FreeplayResult set = g_freeplay.population.SetObjective(ownerId, verdict.verb, verdict.site, source);
     if (!set.ok)
         return set.reason;
+    g_freeplay.previousObjective[ownerId] = previous;
     // Memories are single tokens from the intent parser; AddMemory drops anything else.
     for (const std::string& memory : verdict.memories)
         g_freeplay.population.AddMemory(ownerId, memory);
@@ -271,6 +275,7 @@ void ForgetRetiredOwners()
     EraseRetired(g_freeplay.handedOut);
     EraseRetired(g_freeplay.observations);
     EraseRetired(g_freeplay.appliedRevision);
+    EraseRetired(g_freeplay.previousObjective);
     for (auto it = g_freeplay.knownOwners.begin(); it != g_freeplay.knownOwners.end();)
     {
         if (g_freeplay.population.FindOwner(*it) == nullptr)
@@ -317,6 +322,7 @@ std::string Begin(const std::string& payload, bool& ok)
     g_freeplay.observations.clear();
     g_freeplay.knownOwners.clear();
     g_freeplay.appliedRevision.clear();
+    g_freeplay.previousObjective.clear();
     return Succeed(ok, "epoch=" + std::to_string(epoch));
 }
 
@@ -345,6 +351,7 @@ std::string Retire(const std::string& payload, bool& ok)
     g_freeplay.handedOut.erase(ownerId);
     g_freeplay.observations.erase(ownerId);
     g_freeplay.appliedRevision.erase(ownerId);
+    g_freeplay.previousObjective.erase(ownerId);
     g_freeplay.knownOwners.erase(ownerId);
     for (auto it = g_freeplay.pending.begin(); it != g_freeplay.pending.end();)
     {
@@ -357,6 +364,23 @@ std::string Retire(const std::string& payload, bool& ok)
         it = g_freeplay.pending.erase(it);
     }
     return Succeed(ok, "retired");
+}
+
+// Continue the last feasible plan: a blocked current destination falls back to the objective that was in
+// force before the last committed decision (once), or to the default hold. A different site changes nothing.
+void RevertBlockedObjective(uint64_t ownerId, const std::string& site)
+{
+    const FreeplayOwner* owner = g_freeplay.population.FindOwner(ownerId);
+    if (owner == nullptr || owner->objective.site == "-" || owner->objective.site != site)
+        return;
+    FreeplayObjective restored;   // hold at "-"
+    const auto previous = g_freeplay.previousObjective.find(ownerId);
+    if (previous != g_freeplay.previousObjective.end())
+    {
+        restored = previous->second;
+        g_freeplay.previousObjective.erase(previous);
+    }
+    g_freeplay.population.SetObjective(ownerId, restored.verb, restored.site, FreeplayObjectiveSource::Hold);
 }
 
 std::string Event(const std::string& payload, bool& ok)
@@ -383,6 +407,8 @@ std::string Event(const std::string& payload, bool& ok)
     entry.verdict = "event";
     entry.site = tokens[2];
     g_freeplay.ledger.Append(entry);
+    if (tokens[1] == "blocked")
+        RevertBlockedObjective(owner->ownerId, tokens[2]);
     return Succeed(ok, "queued");
 }
 
