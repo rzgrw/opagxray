@@ -272,9 +272,13 @@ class FreeplayProbeTests(unittest.TestCase):
         self.assertEqual(0, pack['accepted_live'])
         self.assertEqual({'stale_membership': 1}, pack['rejections'])
         self.assertEqual({'timeout': 1}, pack['holds'])
-        self.assertEqual({'median': 1200, 'max': 1500}, squad['latencyMs'])
+        self.assertEqual({'median': 1200, 'max': 1500}, squad['latencyMs_live'])
+        self.assertEqual({'median': None, 'max': None}, squad['latencyMs_hold'])
         self.assertEqual({'median': 200, 'max': 300}, squad['queueAgeMs'])
-        self.assertEqual({'median': 1550, 'max': 2000}, pack['latencyMs'])
+        self.assertEqual({'median': 1100, 'max': 1100}, pack['latencyMs_live'])   # the hold is not a reply
+        self.assertEqual({'median': 2000, 'max': 2000}, pack['latencyMs_hold'])
+        self.assertEqual({'median': 125, 'max': 200}, pack['queueAgeMs'])        # pooled: live and hold
+        self.assertNotIn('latencyMs', squad)
         self.assertEqual(5, summary['lines'])
         self.assertEqual(1, summary['first_serial'])
         self.assertEqual(5, summary['last_serial'])
@@ -342,6 +346,22 @@ class FreeplayProbeTests(unittest.TestCase):
         self.assertEqual(['pack', 'squad'], summary['kinds_proven'])
         self.assertEqual(4, summary['lines'])
         self.assertEqual(3, bridge.count('ai.freeplay.log'))   # stops polling after the failure
+
+    def test_watch_counts_observation_timeouts(self):
+        # Engine shape (xrSimFreeplayBridge.cpp TakeTimedOutObservations): source unset -> `-`,
+        # verdict=observation_timeout, wakeReason = the wake's reasons.
+        lines = [
+            'serial=1 ownerId=3 queueAgeMs=40 latencyMs=5000 epoch=1 membershipRevision=1 wakeReason=spawn '
+            'source=- verdict=observation_timeout verb=- site=- provider=- model=-\n',
+            'serial=2 ownerId=5 queueAgeMs=10 latencyMs=5000 epoch=1 membershipRevision=2 '
+            'wakeReason=membership,arrived source=- verdict=observation_timeout verb=- site=- provider=- model=-\n',
+            ledger_line(3, 5, 'spawn', 'hold', 'timeout', '-'),
+        ]
+        code, summary, _, _ = self.run_watch(WatchWorld(WATCH_OWNERS, [lines]))
+        self.assertEqual(1, summary['kinds']['squad']['observation_timeouts'])
+        self.assertEqual(1, summary['kinds']['pack']['observation_timeouts'])
+        self.assertEqual(0, summary['kinds']['pack']['arrivals'])       # a wake reason, not an arrived event
+        self.assertEqual({'timeout': 1}, summary['kinds']['pack']['holds'])
 
     def test_watch_counts_only_accepted_live_and_later_arrivals(self):
         lines = [

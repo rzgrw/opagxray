@@ -21,7 +21,9 @@ appends an `ai.freeplay.owners` snapshot to owners.jsonl. It then writes summary
 last serial, serial gaps (a gap means lines left the 512-entry ledger ring between polls), transferable owners
 per kind from the last snapshot and, per owner kind (joined from the snapshots by ownerId): accepted, kept and
 rejected (by verdict) live decisions, recorded decisions, holds by reason, arrivals, blocked, casualties,
-observation timeouts, and median/max latencyMs and queueAgeMs over live and hold lines. An owner is proven when
+observation timeouts (verdict=observation_timeout), median/max latencyMs separately over live lines
+(latencyMs_live, model replies) and hold lines (latencyMs_hold, time to provider failure), and median/max
+queueAgeMs over live and hold lines together. An owner is proven when
 an `arrived` event for it has a higher serial than its first accepted `source=live` line. watch exits 0 only if
 there are transferable owners and every kind among them has a proven owner. If the bridge connection is lost
 (the game exited), it stops polling, still writes summary.json with `bridge_lost`, and exits 1.
@@ -352,7 +354,7 @@ def summarise_watch(entries, kind_of, transferable_by_kind):
         return kinds.setdefault(kind, {'accepted_live': 0, 'kept_live': 0, 'rejections': {}, 'holds': {},
                                        'recorded': {}, 'arrivals': 0, 'blocked': 0, 'casualties': 0,
                                        'observation_timeouts': 0, 'owners_proven': [],
-                                       'latency': [], 'queue': []})
+                                       'latency_live': [], 'latency_hold': [], 'queue': []})
 
     accepted_at = {}        # owner -> serial of its first accepted live decision
     proven = set()
@@ -361,7 +363,8 @@ def summarise_watch(entries, kind_of, transferable_by_kind):
         b = bucket(kind_of.get(owner, 'unknown'))
         source, verdict, reason = e.get('source'), e.get('verdict'), e.get('wakeReason')
         if source in ('live', 'hold'):
-            for key, field in (('latency', 'latencyMs'), ('queue', 'queueAgeMs')):
+            # Model reply latency and time-to-failure are kept apart; queue age is pooled.
+            for key, field in (('latency_' + source, 'latencyMs'), ('queue', 'queueAgeMs')):
                 value = as_int(e.get(field))
                 if value is not None:
                     b[key].append(value)
@@ -387,13 +390,14 @@ def summarise_watch(entries, kind_of, transferable_by_kind):
                 b['blocked'] += 1
             elif reason == 'casualty':
                 b['casualties'] += 1
-        elif reason == 'observation_timeout':
+        elif verdict == 'observation_timeout':     # engine: source unset (`-`), wakeReason = the wake's reasons
             b['observation_timeouts'] += 1
 
     for kind in transferable_by_kind:
         bucket(kind)
     for b in kinds.values():
-        b['latencyMs'] = stats(b.pop('latency'))
+        b['latencyMs_live'] = stats(b.pop('latency_live'))
+        b['latencyMs_hold'] = stats(b.pop('latency_hold'))
         b['queueAgeMs'] = stats(b.pop('queue'))
     required = sorted(transferable_by_kind)
     kinds_proven = sorted(k for k in required if kinds[k]['owners_proven'])
@@ -480,7 +484,8 @@ def watch(bridge, out, minutes, sleep=time.sleep, clock=time.time, interval=WATC
     for kind, b in sorted(kinds.items()):
         print(f'{kind}: accepted_live={b["accepted_live"]} kept_live={b["kept_live"]} arrivals={b["arrivals"]} '
               f'proven_owners={len(b["owners_proven"])} rejections={b["rejections"]} holds={b["holds"]} '
-              f'latencyMs={b["latencyMs"]} queueAgeMs={b["queueAgeMs"]}')
+              f'observation_timeouts={b["observation_timeouts"]} latencyMs_live={b["latencyMs_live"]} '
+              f'latencyMs_hold={b["latencyMs_hold"]} queueAgeMs={b["queueAgeMs"]}')
     print(f'passed={passed} missing={",".join(kinds_missing) or "-"}')
     return 0 if passed else 1
 
