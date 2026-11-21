@@ -334,6 +334,13 @@ DeviceState CHW::GetDeviceState() const
     if (flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN))
         return DeviceState::Lost;
 
+    // A background instance's window is off-screen by design and presents without
+    // vsync (UpdateVSync), so it is occluded whenever the displays sleep or the
+    // session locks. Treating that as lost would stall precache and the load
+    // screen forever; render on. Hidden/minimized still pause it.
+    if (AgentBackgroundMode())
+        return DeviceState::Normal;
+
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (SDL_GetWindowWMInfo(m_window, &info) && info.subsystem == SDL_SYSWM_COCOA)
