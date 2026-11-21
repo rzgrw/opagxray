@@ -19,6 +19,8 @@ local LONE_SCAN_MS = 60000
 local MAX_SITES = 8
 local MAX_SIGHTINGS = 6
 local SIGHT_RADIUS_M = 150
+local SIGHT_EXIT_RADIUS_M = 225
+local SIGHT_COOLDOWN_MS = 300000
 
 local NO_GROUP = 65535
 local PROPS_KINDS = {"base", "territory", "lair", "resource"}
@@ -40,7 +42,7 @@ local objectives = {}      -- [group id] = {rev, verb, site, blocked_rev, arrive
 local adapter_target = {}  -- [group id] = smart name this adapter wrote into scripted_target
 local adapter_lock = {}    -- [group id] = true when this adapter set __lock
 local enrolled = {}        -- [group id] = writer reported in the last sync
-local hostile_near = {}    -- [group id] = {[other group id] = true} from the last sync
+local sight_pairs = {}     -- [observer id] = {[other id] = {armed, fired}} for damped sighting events
 local warned = {}          -- [key] = true once a warning was logged
 local smart_level = {}     -- [smart id] = level id (cached)
 
@@ -263,37 +265,79 @@ local function describe(squad)
 	}
 end
 
-local function update_sightings(groups)
+-- Sighting events, damped. A pair (observer, other) fires when a hostile squad comes within
+-- SIGHT_RADIUS_M of an observer the model can act on (writer sim); it re-arms only after the
+-- two were farther apart than SIGHT_EXIT_RADIUS_M at a sync, and never fires again within
+-- SIGHT_COOLDOWN_MS. The first sync is a baseline. Pair state is dropped as soon as either
+-- squad leaves the snapshot, stops being sim (observer), or the entry carries no information.
+local function update_sightings(groups, now)
 	local by_level = {}
+	local present = {}
 	for i = 1, #groups do
-		local list = by_level[groups[i].level_id]
+		local group = groups[i]
+		present[group.squad.id] = true
+		local list = by_level[group.level_id]
 		if not list then
 			list = {}
-			by_level[groups[i].level_id] = list
+			by_level[group.level_id] = list
 		end
-		list[#list + 1] = groups[i]
+		list[#list + 1] = group
 	end
-	local now_near = {}
+
 	local events = {}
 	for _, list in pairs(by_level) do
 		for i = 1, #list do
 			local a = list[i]
-			local near = {}
-			now_near[a.squad.id] = near
-			for j = 1, #list do
-				local b = list[j]
-				if i ~= j and a.squad.position:distance_to(b.squad.position) <= SIGHT_RADIUS_M and
-					relation_between(a.species, a.community, b.species, b.community) == "enemy" then
-					near[b.squad.id] = true
-					local before = hostile_near[a.squad.id]
-					if first_sync_done and not (before and before[b.squad.id]) then
-						events[#events + 1] = a.squad.id .. " sighting " .. b.squad:name()
+			local a_id = a.squad.id
+			if enrolled[a_id] == "sim" then
+				local pairs_of_a = sight_pairs[a_id]
+				for j = 1, #list do
+					local b = list[j]
+					if i ~= j then
+						local b_id = b.squad.id
+						local state = pairs_of_a and pairs_of_a[b_id]
+						local distance = a.squad.position:distance_to(b.squad.position)
+						if distance <= SIGHT_RADIUS_M then
+							if (state == nil or state.armed) and
+								relation_between(a.species, a.community, b.species, b.community) == "enemy" then
+								local cooling = state and state.fired and now - state.fired < SIGHT_COOLDOWN_MS
+								if not first_sync_done then
+									state = {armed = false}
+								elseif not cooling then
+									events[#events + 1] = a_id .. " sighting " .. b.squad:name()
+									state = {armed = false, fired = now}
+								end
+								if state then
+									pairs_of_a = pairs_of_a or {}
+									sight_pairs[a_id] = pairs_of_a
+									pairs_of_a[b_id] = state
+								end
+							end
+						elseif state and distance > SIGHT_EXIT_RADIUS_M then
+							state.armed = true
+						end
 					end
 				end
 			end
 		end
 	end
-	hostile_near = now_near
+
+	for a_id, pairs_of_a in pairs(sight_pairs) do
+		if not present[a_id] or enrolled[a_id] ~= "sim" then
+			sight_pairs[a_id] = nil
+		else
+			for b_id, state in pairs(pairs_of_a) do
+				local expired = state.armed and (state.fired == nil or now - state.fired >= SIGHT_COOLDOWN_MS)
+				if not present[b_id] or expired then
+					pairs_of_a[b_id] = nil
+				end
+			end
+			if next(pairs_of_a) == nil then
+				sight_pairs[a_id] = nil
+			end
+		end
+	end
+
 	for i = 1, #events do
 		call("ai.freeplay.event", events[i])
 	end
@@ -364,7 +408,7 @@ local function sync(now)
 	if not first_sync_done then
 		log_info(string.format("synced %s groups=%d lone=%d", text, #groups, lone))
 	end
-	update_sightings(groups)
+	update_sightings(groups, now)
 	first_sync_done = true
 end
 
@@ -580,7 +624,7 @@ local function on_squad_unregister(squad)
 	call("ai.freeplay.retire", tostring(id))
 	release(squad, true)
 	enrolled[id] = nil
-	hostile_near[id] = nil
+	sight_pairs[id] = nil
 end
 
 local function on_squad_npc_death(squad, npc)
