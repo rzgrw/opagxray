@@ -1188,6 +1188,28 @@ bool TestBlockedEventRewakesOwner()
     return Expect(size_t(std::count(after.begin(), after.end(), '\n')) == lines, "refused event writes nothing") && ok;
 }
 
+// A sighting only requests a wake: it writes no ledger line of its own, and its reason shows on
+// the owner's next decision line instead.
+bool TestSightingEventWakesWithoutLedger()
+{
+    StartFreeplay("recorded");
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    const std::string before = RequireVerb("ai.freeplay.log");
+    bool ok = Expect(Verb("ai.freeplay.event", "500 sighting bandit_squad_7").text == "queued",
+        "sighting queues a wake");
+    ok = Expect(Contains(OwnerLine(1), "state=queued "), ("sighting owner queued: " + OwnerLine(1)).c_str()) && ok;
+    const std::string after = RequireVerb("ai.freeplay.log");
+    ok = Expect(after == before, ("sighting writes no ledger line: " + after).c_str()) && ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.tick", "45000"), "observe 1 group 500 1"),
+        "sighting wake handed out once the wake interval passed") && ok;
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    RequireVerb("ai.freeplay.decide", "1 stay");
+    const std::string decided = RequireVerb("ai.freeplay.log");
+    return Expect(Contains(decided, "wakeReason=sighting source=recorded verdict=accepted verb=stay"),
+               ("decision line carries the sighting reason: " + decided).c_str()) && ok;
+}
+
 bool TestModeOffEmitsNothing()
 {
     RequireVerb("ai.reset");
@@ -1291,6 +1313,7 @@ int main()
     ok = TestModelCoastIsKept() && ok;
     ok = TestLiveModeRefusedWithoutProvider() && ok;
     ok = TestBlockedEventRewakesOwner() && ok;
+    ok = TestSightingEventWakesWithoutLedger() && ok;
     ok = TestModeOffEmitsNothing() && ok;
     ok = TestResetClearsFreeplay() && ok;
     ok = TestRecordedObservationsFreeSlots() && ok;

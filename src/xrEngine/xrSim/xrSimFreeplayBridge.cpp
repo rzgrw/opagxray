@@ -370,6 +370,9 @@ std::string Event(const std::string& payload, bool& ok)
     if (owner == nullptr)
         return Fail(ok, "unknown_group");
     g_freeplay.scheduler.RequestWake(owner->ownerId, tokens[1], g_freeplay.nowMs);
+    // Sightings are frequent; they show up only as the wakeReason of the owner's next decision.
+    if (tokens[1] == "sighting")
+        return Succeed(ok, "queued");
 
     FreeplayLedgerEntry entry;
     entry.ownerId = owner->ownerId;
