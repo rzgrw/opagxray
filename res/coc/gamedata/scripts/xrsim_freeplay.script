@@ -266,7 +266,7 @@ local function describe(squad)
 end
 
 -- Sighting events, damped. A pair (observer, other) fires when a hostile squad comes within
--- SIGHT_RADIUS_M of an observer the model can act on (writer sim); it re-arms only after the
+-- SIGHT_RADIUS_M of an observer the model can act on (writer sim) on the actor's level; it re-arms only after the
 -- two were farther apart than SIGHT_EXIT_RADIUS_M at a sync, and never fires again within
 -- SIGHT_COOLDOWN_MS. The first sync is a baseline. Pair state is dropped as soon as either
 -- squad leaves the snapshot, stops being sim (observer), or the entry carries no information.
@@ -275,7 +275,7 @@ local function update_sightings(groups, now)
 	local present = {}
 	for i = 1, #groups do
 		local group = groups[i]
-		present[group.squad.id] = true
+		present[group.squad.id] = group.level_id
 		local list = by_level[group.level_id]
 		if not list then
 			list = {}
@@ -284,12 +284,15 @@ local function update_sightings(groups, now)
 		list[#list + 1] = group
 	end
 
+	-- Only the actor's level: what the player can check, and online squads with real positions.
+	local se_actor = alife():actor()
+	local actor_level = se_actor and level_id_of_vertex(se_actor.m_game_vertex_id)
 	local events = {}
-	for _, list in pairs(by_level) do
+	for level_id, list in pairs(by_level) do
 		for i = 1, #list do
 			local a = list[i]
 			local a_id = a.squad.id
-			if enrolled[a_id] == "sim" then
+			if enrolled[a_id] == "sim" and level_id == actor_level then
 				local pairs_of_a = sight_pairs[a_id]
 				for j = 1, #list do
 					local b = list[j]
@@ -323,7 +326,7 @@ local function update_sightings(groups, now)
 	end
 
 	for a_id, pairs_of_a in pairs(sight_pairs) do
-		if not present[a_id] or enrolled[a_id] ~= "sim" then
+		if not present[a_id] or enrolled[a_id] ~= "sim" or present[a_id] ~= actor_level then
 			sight_pairs[a_id] = nil
 		else
 			for b_id, state in pairs(pairs_of_a) do

@@ -5,7 +5,7 @@
   freeplay_runtime.py install --runtime <dir> [--force]
 
 clone copies database/, gamedata/ and fsgame.ltx from a play runtime, gives the copy its own
-appdata/ with the source user.ltx and the one named save, then installs the adapter. The
+appdata/ with the source user.ltx (game volumes forced to 0) and the one named save, then installs the adapter. The
 source runtime is only read. install copies res/coc/gamedata/scripts/xrsim_freeplay.script
 into <dir>/gamedata/scripts/ and refuses to replace a different file unless --force is given.
 """
@@ -40,6 +40,25 @@ def copy_tree(source: Path, dest: Path):
         if dest.exists():
             shutil.rmtree(dest)
     shutil.copytree(source, dest, symlinks=True)
+
+
+SILENT_SETTINGS = (('snd_volume_eff', 'snd_volume_eff 0.'), ('snd_volume_music', 'snd_volume_music 0.'))
+
+
+def silenced_user_ltx(text: str) -> str:
+    """The source settings with both game volumes forced to 0 (replaced in place or appended).
+
+    Private runtimes run with -agent_sound, which opens a real audio device; they must stay silent."""
+    lines = text.splitlines()
+    for key, setting in SILENT_SETTINGS:
+        found = False
+        for i, line in enumerate(lines):
+            if line.split(None, 1)[:1] == [key]:
+                lines[i] = setting
+                found = True
+        if not found:
+            lines.append(setting)
+    return '\n'.join(lines) + '\n'
 
 
 def install(runtime: Path, force: bool):
@@ -94,7 +113,8 @@ def clone(source: Path, dest: Path, save: str):
     shutil.copy2(source / 'fsgame.ltx', dest / 'fsgame.ltx')
     savedgames = dest / 'appdata' / 'savedgames'
     savedgames.mkdir(parents=True)
-    shutil.copy2(source / 'appdata' / 'user.ltx', dest / 'appdata' / 'user.ltx')
+    settings = (source / 'appdata' / 'user.ltx').read_text(encoding='latin-1')
+    (dest / 'appdata' / 'user.ltx').write_text(silenced_user_ltx(settings), encoding='latin-1')
     for path in saves:
         shutil.copy2(path, savedgames / path.name)
     print(f'cloned {source} -> {dest} with save {save}')

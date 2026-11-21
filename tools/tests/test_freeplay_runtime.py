@@ -54,12 +54,27 @@ class FreeplayRuntimeTests(unittest.TestCase):
         self.assertEqual('archive bytes', (self.dest / 'database/x.db').read_text())
         self.assertEqual('fs aliases', (self.dest / 'fsgame.ltx').read_text())
         self.assertEqual('config a', (self.dest / 'gamedata/configs/a.ltx').read_text())
-        self.assertEqual('renderer renderer_r3', (self.dest / 'appdata/user.ltx').read_text())
+        self.assertEqual(['renderer renderer_r3', 'snd_volume_eff 0.', 'snd_volume_music 0.'],
+                         (self.dest / 'appdata/user.ltx').read_text().splitlines())
         saves = sorted(p.name for p in (self.dest / 'appdata/savedgames').iterdir())
         self.assertEqual(['cordon_start.scoc', 'cordon_start.scop'], saves)
         self.assertEqual(['savedgames', 'user.ltx'], sorted(p.name for p in (self.dest / 'appdata').iterdir()))
         self.assertEqual(ADAPTER.read_bytes(), (self.dest / 'gamedata/scripts/xrsim_freeplay.script').read_bytes())
         self.assertFalse((self.source / 'gamedata/scripts').exists())
+
+    def test_clone_silences_nonzero_volumes(self):
+        self.put(self.source / 'appdata/user.ltx',
+                 'renderer renderer_r3\nsnd_volume_eff 0.8\nvid_mode 1024x576\nsnd_volume_music 0.5\n')
+        self.clone()
+        self.assertEqual(['renderer renderer_r3', 'snd_volume_eff 0.', 'vid_mode 1024x576', 'snd_volume_music 0.'],
+                         (self.dest / 'appdata/user.ltx').read_text().splitlines())
+        self.assertIn('snd_volume_eff 0.8', (self.source / 'appdata/user.ltx').read_text())
+
+    def test_clone_adds_volumes_when_source_has_none(self):
+        self.put(self.source / 'appdata/user.ltx', 'renderer renderer_r3\nvid_mode 1024x576')
+        self.clone()
+        self.assertEqual(['renderer renderer_r3', 'vid_mode 1024x576', 'snd_volume_eff 0.', 'snd_volume_music 0.'],
+                         (self.dest / 'appdata/user.ltx').read_text().splitlines())
 
     def test_clone_refuses_nonempty_destination(self):
         self.put(self.dest / 'keep.txt', 'mine')
