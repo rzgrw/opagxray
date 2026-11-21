@@ -12,11 +12,25 @@ with a stored observation (non-empty sites=), sends `ai.freeplay.decide <owner> 
 then every 5 s records the server position of each squad member (lua, alife_object(id).position)
 and reads the ledger, until an `arrived` or `blocked` event for that owner or the timeout. It writes
 track.json and exits 0 only on `arrived` with the leader within 150 m of the smart.
+
+  freeplay_probe.py watch <endpoint> --minutes <n> --out <dir>
+
+watch wakes nothing and decides nothing. Every 10 s (and once more at the end) it reads
+`ai.freeplay.log 512`, appends lines with a serial not seen before to ledger.txt (in serial order) and
+appends an `ai.freeplay.owners` snapshot to owners.jsonl. It then writes summary.json: total lines, first and
+last serial, serial gaps (a gap means lines left the 512-entry ledger ring between polls), transferable owners
+per kind from the last snapshot and, per owner kind (joined from the snapshots by ownerId): accepted, kept and
+rejected (by verdict) live decisions, recorded decisions, holds by reason, arrivals, blocked, casualties,
+observation timeouts, and median/max latencyMs and queueAgeMs over live and hold lines. An owner is proven when
+an `arrived` event for it has a higher serial than its first accepted `source=live` line. watch exits 0 only if
+there are transferable owners and every kind among them has a proven owner. If the bridge connection is lost
+(the game exited), it stops polling, still writes summary.json with `bridge_lost`, and exits 1.
 """
 import argparse
 import json
 import math
 from pathlib import Path
+import statistics
 import sys
 import time
 
@@ -24,6 +38,7 @@ import time
 KINDS = ('squad', 'pack', 'lone_stalker', 'lone_mutant')
 ARRIVAL_RADIUS_M = 150.0
 POLL_S = 5.0
+WATCH_POLL_S = 10.0
 BUSY_STATES = ('queued', 'awaiting_observation', 'awaiting_decision')
 
 
@@ -318,6 +333,158 @@ def move(bridge, owner_id, site, out, timeout=900.0, sleep=time.sleep, clock=tim
     return finish('arrived', 0 if track['leader_within_m'] else 1)
 
 
+def stats(values):
+    if not values:
+        return {'median': None, 'max': None}
+    return {'median': statistics.median(values), 'max': max(values)}
+
+
+def serial_gaps(serials):
+    """[[first_missing, last_missing], ...] between consecutive seen serials."""
+    return [[a + 1, b - 1] for a, b in zip(serials, serials[1:]) if b - a > 1]
+
+
+def summarise_watch(entries, kind_of, transferable_by_kind):
+    """Per-kind counts from deduplicated ledger entries; `kind_of` maps owner id to kind."""
+    kinds = {}
+
+    def bucket(kind):
+        return kinds.setdefault(kind, {'accepted_live': 0, 'kept_live': 0, 'rejections': {}, 'holds': {},
+                                       'recorded': {}, 'arrivals': 0, 'blocked': 0, 'casualties': 0,
+                                       'observation_timeouts': 0, 'owners_proven': [],
+                                       'latency': [], 'queue': []})
+
+    accepted_at = {}        # owner -> serial of its first accepted live decision
+    proven = set()
+    for e in sorted(entries, key=lambda e: e['serial']):
+        owner = e.get('ownerId')
+        b = bucket(kind_of.get(owner, 'unknown'))
+        source, verdict, reason = e.get('source'), e.get('verdict'), e.get('wakeReason')
+        if source in ('live', 'hold'):
+            for key, field in (('latency', 'latencyMs'), ('queue', 'queueAgeMs')):
+                value = as_int(e.get(field))
+                if value is not None:
+                    b[key].append(value)
+        if source == 'live':
+            if verdict == 'accepted':
+                b['accepted_live'] += 1
+                accepted_at.setdefault(owner, e['serial'])
+            elif verdict == 'kept':
+                b['kept_live'] += 1
+            else:
+                b['rejections'][verdict] = b['rejections'].get(verdict, 0) + 1
+        elif source == 'recorded':
+            b['recorded'][verdict] = b['recorded'].get(verdict, 0) + 1
+        elif source == 'hold':
+            b['holds'][verdict] = b['holds'].get(verdict, 0) + 1
+        elif source == 'event':
+            if reason == 'arrived':
+                b['arrivals'] += 1
+                if owner in accepted_at and e['serial'] > accepted_at[owner] and owner not in proven:
+                    proven.add(owner)
+                    b['owners_proven'].append(owner)
+            elif reason == 'blocked':
+                b['blocked'] += 1
+            elif reason == 'casualty':
+                b['casualties'] += 1
+        elif reason == 'observation_timeout':
+            b['observation_timeouts'] += 1
+
+    for kind in transferable_by_kind:
+        bucket(kind)
+    for b in kinds.values():
+        b['latencyMs'] = stats(b.pop('latency'))
+        b['queueAgeMs'] = stats(b.pop('queue'))
+    required = sorted(transferable_by_kind)
+    kinds_proven = sorted(k for k in required if kinds[k]['owners_proven'])
+    kinds_missing = sorted(k for k in required if not kinds[k]['owners_proven'])
+    return kinds, kinds_proven, kinds_missing
+
+
+def watch(bridge, out, minutes, sleep=time.sleep, clock=time.time, interval=WATCH_POLL_S):
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    ledger_path, owners_path = out / 'ledger.txt', out / 'owners.jsonl'
+    ledger_path.write_text('')
+    owners_path.write_text('')
+    start = clock()
+    deadline = start + minutes * 60.0
+    seen = {}               # serial -> parsed entry
+    kind_of = {}
+    last_owners = []
+    polls = errors = 0
+
+    def poll():
+        nonlocal last_owners, polls, errors
+        polls += 1
+        t = round(clock() - start, 1)
+        ok, text = bridge.request('ai.freeplay.log', '512')
+        if not ok:
+            errors += 1
+            text = ''
+        new = []
+        for line in text.splitlines():
+            fields = parse_fields(line.split())
+            serial = as_int(fields.get('serial'))
+            if serial is None or serial in seen:
+                continue
+            fields['serial'] = serial
+            fields['ownerId'] = as_int(fields.get('ownerId'))
+            seen[serial] = fields
+            new.append((serial, line.strip()))
+        with ledger_path.open('a') as f:
+            for _, line in sorted(new):
+                f.write(line + '\n')
+        ok, text = bridge.request('ai.freeplay.owners', '')
+        owners = parse_owners(text) if ok else []
+        if not ok:
+            errors += 1
+        else:
+            last_owners = owners
+            for o in owners:
+                kind_of[o['id']] = o.get('kind')
+        with owners_path.open('a') as f:
+            f.write(json.dumps({'t': t, 'ok': ok, 'owners': owners}, sort_keys=True) + '\n')
+
+    bridge_lost = None
+    while True:
+        try:
+            poll()
+        except OSError as e:        # the game exited or the bridge closed: keep what was read
+            bridge_lost = str(e) or type(e).__name__
+            print(f'freeplay_probe: bridge lost: {bridge_lost}', file=sys.stderr)
+            break
+        now = clock()
+        if now >= deadline:
+            break
+        sleep(min(interval, deadline - now))
+
+    transferable_by_kind = count_by([o for o in last_owners if is_transferable(o)], 'kind')
+    kinds, kinds_proven, kinds_missing = summarise_watch(seen.values(), kind_of, transferable_by_kind)
+    serials = sorted(seen)
+    gaps = serial_gaps(serials)
+    passed = bool(transferable_by_kind) and not kinds_missing and not bridge_lost
+    summary = {
+        'minutes': minutes, 'polls': polls, 'poll_errors': errors, 'elapsed_s': round(clock() - start, 1),
+        'bridge_lost': bridge_lost,
+        'lines': len(serials), 'first_serial': serials[0] if serials else None,
+        'last_serial': serials[-1] if serials else None, 'contiguous': not gaps, 'serial_gaps': gaps,
+        'transferable_by_kind': transferable_by_kind, 'kinds': kinds,
+        'kinds_proven': kinds_proven, 'kinds_missing': kinds_missing, 'passed': passed,
+    }
+    write_json(out / 'summary.json', summary)
+
+    print(f'lines={summary["lines"]} serials={summary["first_serial"]}..{summary["last_serial"]} '
+          f'contiguous={summary["contiguous"]} transferable=' +
+          ','.join(f'{k}:{v}' for k, v in sorted(transferable_by_kind.items())))
+    for kind, b in sorted(kinds.items()):
+        print(f'{kind}: accepted_live={b["accepted_live"]} kept_live={b["kept_live"]} arrivals={b["arrivals"]} '
+              f'proven_owners={len(b["owners_proven"])} rejections={b["rejections"]} holds={b["holds"]} '
+              f'latencyMs={b["latencyMs"]} queueAgeMs={b["queueAgeMs"]}')
+    print(f'passed={passed} missing={",".join(kinds_missing) or "-"}')
+    return 0 if passed else 1
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -331,6 +498,10 @@ def main(argv=None):
     m.add_argument('--site', required=True)
     m.add_argument('--out', required=True)
     m.add_argument('--timeout', type=float, default=900.0)
+    w = sub.add_parser('watch')
+    w.add_argument('endpoint')
+    w.add_argument('--minutes', type=float, required=True)
+    w.add_argument('--out', required=True)
     args = parser.parse_args(argv)
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -343,6 +514,8 @@ def main(argv=None):
     with bridge:
         if args.command == 'census':
             return census(bridge, args.level, args.out)
+        if args.command == 'watch':
+            return watch(bridge, args.out, args.minutes)
         return move(bridge, args.owner, args.site, args.out, timeout=args.timeout)
 
 

@@ -1,4 +1,6 @@
-"""Freeplay probe: census parsing, owner picking and the recorded move loop, against a fake bridge."""
+"""Freeplay probe: census parsing, owner picking, the recorded move loop and watch, against a fake bridge."""
+import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -36,9 +38,33 @@ def owner_line(owner_id, name, kind, writer, sites='-', state='idle', binding=No
             f'members=2 mrev={mrev} state={state} objective=hold:- source=none rev=0 sites={sites}\n')
 
 
-def ledger_line(serial, owner_id, reason, source, verdict, site, verb='-'):
+def ledger_line(serial, owner_id, reason, source, verdict, site, verb='-', queue=0, latency=0):
     return (f'serial={serial} ownerId={owner_id} epoch=1 membershipRevision=1 wakeReason={reason} source={source} '
-            f'verdict={verdict} verb={verb} site={site} provider=- model=- queueAgeMs=0 latencyMs=0\n')
+            f'verdict={verdict} verb={verb} site={site} provider=- model=- queueAgeMs={queue} latencyMs={latency}\n')
+
+
+# Two transferable owners (a squad and a pack) and a script-owned squad that `watch` must not require.
+WATCH_OWNERS = (owner_line(3, 'stalker_sim_squad_novice1', 'squad', 'sim')
+                + owner_line(5, 'simulation_mix_dogs1', 'pack', 'sim')
+                + owner_line(8, 'esc_script_squad', 'squad', 'script'))
+
+
+class WatchWorld:
+    """A fake game for `watch`: the n-th ledger poll returns batches[n] (the last batch repeats)."""
+
+    def __init__(self, owners, batches):
+        self.owners = owners
+        self.batches = batches
+        self.log_polls = 0
+
+    def __call__(self, bridge, verb, payload):
+        if verb == 'ai.freeplay.owners':
+            return True, self.owners
+        if verb == 'ai.freeplay.log':
+            batch = self.batches[min(self.log_polls, len(self.batches) - 1)]
+            self.log_polls += 1
+            return True, ''.join(batch)
+        return False, f'unexpected verb {verb}'
 
 
 class FakeClock:
@@ -220,6 +246,122 @@ class FreeplayProbeTests(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertEqual('arrived', track['outcome'])
         self.assertFalse(track['leader_within_m'])
+
+    def run_watch(self, world, minutes=1):
+        bridge = FakeBridge(world)
+        clock = FakeClock()
+        with contextlib.redirect_stdout(io.StringIO()) as printed, contextlib.redirect_stderr(io.StringIO()):
+            code = probe.watch(bridge, self.out, minutes=minutes, sleep=clock.sleep, clock=clock.time)
+        summary = json.loads((self.out / 'summary.json').read_text())
+        return code, summary, bridge, printed.getvalue()
+
+    def test_watch_summarises_ledger_by_kind(self):
+        world = WatchWorld(WATCH_OWNERS, [[
+            ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_a', 'move_to', queue=100, latency=900),
+            ledger_line(2, 3, 'arrived', 'event', 'event', 'esc_a'),
+            ledger_line(3, 3, 'arrived', 'live', 'accepted', 'esc_b', 'move_to', queue=300, latency=1500),
+            ledger_line(4, 5, 'spawn', 'live', 'stale_membership', 'esc_c', 'move_to', queue=200, latency=1100),
+            ledger_line(5, 5, 'spawn', 'hold', 'timeout', '-', queue=50, latency=2000),
+        ]])
+        code, summary, bridge, printed = self.run_watch(world)
+        squad, pack = summary['kinds']['squad'], summary['kinds']['pack']
+        self.assertEqual(2, squad['accepted_live'])
+        self.assertEqual(1, squad['arrivals'])
+        self.assertEqual({}, squad['rejections'])
+        self.assertEqual({}, squad['holds'])
+        self.assertEqual(0, pack['accepted_live'])
+        self.assertEqual({'stale_membership': 1}, pack['rejections'])
+        self.assertEqual({'timeout': 1}, pack['holds'])
+        self.assertEqual({'median': 1200, 'max': 1500}, squad['latencyMs'])
+        self.assertEqual({'median': 200, 'max': 300}, squad['queueAgeMs'])
+        self.assertEqual({'median': 1550, 'max': 2000}, pack['latencyMs'])
+        self.assertEqual(5, summary['lines'])
+        self.assertEqual(1, summary['first_serial'])
+        self.assertEqual(5, summary['last_serial'])
+        self.assertTrue(summary['contiguous'])
+        self.assertEqual({'squad': 1, 'pack': 1}, summary['transferable_by_kind'])
+        self.assertIn(('ai.freeplay.log', '512'), bridge.calls)
+        self.assertIn('squad', printed)
+
+    def test_watch_requires_live_decision_and_arrival_per_kind(self):
+        squad_ok = [ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_a', 'move_to'),
+                    ledger_line(2, 3, 'arrived', 'event', 'event', 'esc_a')]
+        pack_decided = [ledger_line(3, 5, 'spawn', 'live', 'accepted', 'esc_b', 'move_to')]
+        code, summary, _, _ = self.run_watch(WatchWorld(WATCH_OWNERS, [squad_ok + pack_decided]))
+        self.assertEqual(1, code)
+        self.assertEqual(['squad'], summary['kinds_proven'])
+        self.assertEqual(['pack'], summary['kinds_missing'])
+        self.assertFalse(summary['passed'])
+
+        pack_arrived = pack_decided + [ledger_line(4, 5, 'arrived', 'event', 'event', 'esc_b')]
+        self.out = Path(self.temp.name) / 'out2'
+        code, summary, _, _ = self.run_watch(WatchWorld(WATCH_OWNERS, [squad_ok + pack_arrived]))
+        self.assertEqual(0, code)
+        self.assertEqual(['pack', 'squad'], summary['kinds_proven'])
+        self.assertTrue(summary['passed'])
+
+    def test_watch_deduplicates_ledger_lines_by_serial(self):
+        first = [ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_a', 'move_to')]
+        second = first + [ledger_line(2, 3, 'arrived', 'event', 'event', 'esc_a')]
+        code, summary, bridge, _ = self.run_watch(WatchWorld(WATCH_OWNERS, [first, second, second]))
+        ledger = (self.out / 'ledger.txt').read_text().splitlines()
+        self.assertEqual(['serial=1', 'serial=2'], [l.split()[0] for l in ledger])
+        self.assertEqual(2, summary['lines'])
+        self.assertEqual(1, summary['kinds']['squad']['accepted_live'])
+        self.assertEqual(1, summary['kinds']['squad']['arrivals'])
+        snapshots = (self.out / 'owners.jsonl').read_text().splitlines()
+        self.assertEqual(bridge.count('ai.freeplay.owners'), len(snapshots))
+        self.assertGreaterEqual(len(snapshots), 6)      # one per 10 s over a minute
+        self.assertEqual([3, 5, 8], [o['id'] for o in json.loads(snapshots[0])['owners']])
+        self.assertEqual({'squad': 1, 'pack': 1}, summary['transferable_by_kind'])   # 8 is script-owned
+
+    def test_watch_reports_serial_gap(self):
+        # The ledger ring rolled past serials 3..4 between polls.
+        lines = [[ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_a', 'move_to'),
+                  ledger_line(2, 3, 'arrived', 'event', 'event', 'esc_a')],
+                 [ledger_line(5, 5, 'spawn', 'hold', 'timeout', '-')]]
+        code, summary, _, _ = self.run_watch(WatchWorld(WATCH_OWNERS, lines))
+        self.assertFalse(summary['contiguous'])
+        self.assertEqual([[3, 4]], summary['serial_gaps'])
+        self.assertEqual(3, summary['lines'])
+
+    def test_watch_writes_summary_when_the_game_goes_away(self):
+        proven = [ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_a', 'move_to'),
+                  ledger_line(2, 3, 'arrived', 'event', 'event', 'esc_a'),
+                  ledger_line(3, 5, 'spawn', 'live', 'accepted', 'esc_b', 'move_to'),
+                  ledger_line(4, 5, 'arrived', 'event', 'event', 'esc_b')]
+        world = WatchWorld(WATCH_OWNERS, [proven])
+
+        def dying(bridge, verb, payload):
+            if verb == 'ai.freeplay.log' and world.log_polls >= 2:
+                raise ConnectionError('bridge closed the connection')
+            return world(bridge, verb, payload)
+        code, summary, bridge, _ = self.run_watch(dying, minutes=5)
+        self.assertEqual(1, code)                      # a lost game never passes, even with every kind proven
+        self.assertTrue(summary['bridge_lost'])
+        self.assertEqual(['pack', 'squad'], summary['kinds_proven'])
+        self.assertEqual(4, summary['lines'])
+        self.assertEqual(3, bridge.count('ai.freeplay.log'))   # stops polling after the failure
+
+    def test_watch_counts_only_accepted_live_and_later_arrivals(self):
+        lines = [
+            ledger_line(1, 3, 'arrived', 'event', 'event', 'esc_a'),                 # before the decision
+            ledger_line(2, 3, 'spawn', 'live', 'accepted', 'esc_a', 'move_to'),
+            ledger_line(3, 5, 'spawn', 'live', 'kept', '-', 'keep'),
+            ledger_line(4, 5, 'arrived', 'event', 'event', 'esc_b'),
+            ledger_line(5, 5, 'spawn', 'live', 'constrained', 'esc_b', 'move_to'),
+            ledger_line(6, 5, 'arrived', 'event', 'event', 'esc_b'),
+            ledger_line(7, 5, 'spawn', 'recorded', 'accepted', 'esc_b', 'move_to'),
+            ledger_line(8, 5, 'arrived', 'event', 'event', 'esc_b'),
+        ]
+        code, summary, _, _ = self.run_watch(WatchWorld(WATCH_OWNERS, [lines]))
+        self.assertEqual(1, code)
+        self.assertEqual([], summary['kinds_proven'])
+        self.assertEqual(['pack', 'squad'], summary['kinds_missing'])
+        self.assertEqual(0, summary['kinds']['pack']['accepted_live'])
+        self.assertEqual(1, summary['kinds']['pack']['kept_live'])
+        self.assertEqual({'constrained': 1}, summary['kinds']['pack']['rejections'])
+        self.assertEqual(1, summary['kinds']['squad']['accepted_live'])
 
 
 if __name__ == '__main__':
