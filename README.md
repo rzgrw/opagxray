@@ -255,8 +255,8 @@ rg -n "FATAL|SCRIPT RUNTIME ERROR|no static|already at graph vertex|not found at
 ## Known Runtime Notes
 
 - Some CoC startup warnings are mod-script issues, not engine regressions.
-- Running without an audio device (`-nosound`, `-agent_background`) can hit an NPC sound-player null dereference in CoC. A fix exists on an unmerged soak branch; until it lands, background instances may crash when NPCs speak.
-- CoC can hit a `sound_theme.script` nil `played_id` bug during campfire sound updates; a local game-data guard may be needed for long sessions.
+- Running without an audio device (`-nosound`, or `-agent_background` without `-agent_sound`) used to crash in the NPC sound player (null `CSound` in `CSoundPlayer::play`); fixed in `121d5b5ec` (on branch `feat/freeplay-population-ai`), where the player skips the write when sound is disabled.
+- CoC 1.4.22 can hit a stock `sound_theme.script:206` nil `played_id` error when an online camp tells a story whose sound theme has no `shuffle` key; it is fatal. On macOS (2026-11-21) it ended 11 of 15 background launches near the Rookie village, with and without `-agent_sound` and with and without the freeplay adapter. A local game-data guard is needed for long sessions; the scripts are not modified in this repository.
 - Fullscreen resolution changes on Windows are not yet verified after the viewport fix.
 
 ## Repository Layout

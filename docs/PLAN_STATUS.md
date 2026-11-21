@@ -150,3 +150,46 @@ Not-ready intervals now use their executed phase rather than a device-loss flag;
 The standalone seal/attest sidecar is independently reviewed; 40 focused tests, 16 independent probes and a coordinator rerun of all 107 tooling tests pass. It preserves raw capture bytes and separates asset verification from full measurement acceptance. Live runtime/image observation and the overhead-specific adapter remain open, so no historical capture becomes accepted and no performance number is claimed.
 
 The frozen transfer WIP (`8cf2af572` from `archive/transfer/windows-2026-11-07`) is integrated into `dev` (2026-11-08): the agent-bridge socket rule (in-tree endpoint as communication metadata, `association=path-only`, never `live-fd` on Darwin) and the optional runner-owned external `0700` communication directory with the launcher-record `external_communication_directory` field. The WIP contains edits that aim to repair both P2 findings from the last independent review along the reviewer's minimal corrections (not yet verified; the archived wrap-up says they must be rechecked before claiming closure): directory disjointness uses device/inode identity in both directions (case-insensitive aliases included, without lowercasing paths), and seal/attest recheck directory identity, type, mode, uid, and canonical path after the socket observation, raising `stat_race` on drift. On Windows the suite shows zero status changes on the 40 pre-existing tests and one new portable parsing test passing; the 14 new socket/external fixture tests are macOS-only by construction (Darwin temp paths, libproc, POSIX modes). The saved reviewer `external-probes.py` delta review is still owed before closure is claimed, live attestation remains macOS-scoped per WINDOWS_HANDOFF, and a runner adoption of the external-directory contract remains required before any probe campaign.
+
+## Freeplay population AI — 2026-11-21
+
+On 2026-11-21 the user decided to run this AI work ahead of the GL stability comparison. Branch `feat/freeplay-population-ai` (local, not pushed), plan and briefs in `.superpowers/sdd/2026-11-20-freeplay-population-ai/`. Commits: owner registry `4a6da9f65`/`3cedf8c0a`, decision validation `e3efa4ef2`, wake scheduler `1f33b2a7c`, `ai.freeplay.*` verbs and `xrsim_verb` `15fe1cd39`/`a3975d324`, CoC adapter and runtime clone tool `4f93352ed`, adapter fixes `fe0fd47ab`/`b5520741d`/`faafd08f3`/`a718747f6`, sighting ledger `4ad065110`, and the Task 6 probe commit that adds this section. Everything below is a **macOS** run (arm64, CMake build); the Windows build of the new sources (`xrSimFreeplay*`, `xrSim_script.cpp`, which are listed in the vcxproj) is unverified.
+
+Engine changes made for background testing in Task 5:
+- `121d5b5ec`: the NPC sound player does nothing when sound is disabled. Without this, the null `CSound` write in `CSoundPlayer::play` crashed `-nosound`/`-agent_background` in game.
+- `d1d7a0877`: background instances present without vsync (swap interval 0 under `AgentBackgroundMode()`). Frame-time captures taken with `-agent_background` are therefore not vsync-paced.
+- `f21294dd4`: `-agent_sound` keeps the audio device open in background mode. The cloned runtime sets game volumes to 0.
+
+Stock CoC crash: `sound_theme.script:206` (`played_id` nil; camp story themes without a `shuffle` key) is fatal. Without `-agent_sound` it ended each Task 5 fix-3 background run after about 100–150 s of play. With `-agent_sound` it still ended 11 of the 15 launches in Task 6 near the Rookie village, 2 of them without `-xrsim_freeplay`. Stock scripts were not modified.
+
+Adapter behaviour to keep in mind: a `hold` keeps a squad on its already assigned smart, so a holding squad may still be finishing travel it had started (including toward another level).
+
+Tests: `python3 -m unittest tools.tests.test_freeplay_probe tools.tests.test_freeplay_runtime` → 15 tests OK (7 probe, 8 runtime). `tools/xrsim_standalone/build_and_test.sh` (Tasks 1–5) was not rerun in Task 6. Evidence: `artifacts/freeplay-ai/2026-11-cordon/` (git-ignored, kept locally; see its README).
+
+- **Census (Step 5): passed.** `tools/freeplay_probe.py census`, exit 0. Results:
+  - l01_escape: `npcs=96 owners=50 transferable=46 script_owned=4 unbound=0`.
+  - All linked levels: `npcs=383 owners=195 transferable=182 script_owned=13 unbound=0`.
+  - All four owner kinds are transferable on l01_escape.
+  - The 13 script-owned squads are listed in the evidence README: 4 at Cordon, 9 at the Marsh base and doctor, one of them `random`.
+  - No companions exist in the save.
+  - Sidorovich and the Forester are `script_trader` objects that the adapter does not enroll at all. This is a missing binding.
+- **Recorded moves (Step 6): partly shown.** In each run below, the recorded `move_to` replaced the squad's stock destination and the squad arrived (exit 0):
+  - offline pack 349: run A to 4_11 (~560 m away, 234 s), run B to 5_4;
+  - squad 357, online after 61 s: turned back from its off-level stock target into the Rookie village, 326 s;
+  - offline lone stalker 233: 97 s;
+  - lone mutant 110: 56 s.
+  - The pack pair ends at different smarts, but run B was the pack's own stock smart. With Cordon smarts at `max_population`, each observation offered only the current smart plus one other.
+  - Not shown:
+    - the squad pair's run B (the game crashed in the stock bug 31 s in);
+    - the online pack run (boar 238: destination switched at once, but no `arrived` event in 900 s; final distance 129 m).
+- **Membership (Step 7):**
+  - **Leader loss: passed.** The same owner id was kept, `mrev` went 1→2, the objective was kept, and the squad arrived.
+  - **Split: passed.** The decision returned `stale_membership`, and the moved NPC's census line shows the destination squad's owner. Both squads were `hold:-`, so the objective part does not tell them apart. Stock scripts accepted `unregister_member`/`register_member`.
+  - **A lone owner joining a group: not exercised separately.**
+  - **Blocked destination:**
+    - With the brief's `disabled = true` it was **not** blocked, because CoC's `target_precondition` ignores `disabled`.
+    - With `respawn_only_smart = true` it **passed**: a `blocked` ledger line, the squad kept its previous target, and the owner was queued again. The engine objective stays at the blocked site.
+  - Step 7 ran with the actor moved away from the village camp and `g_god on`, to get past the stock crash.
+- **Regression gate (Step 8): not passed.** Both stock (no-flag) attempts crashed in the stock `sound_theme` bug before the scenario began, so movement, save/load, inventory, menu and quit were not exercised.
+- Environment: from the third launch on, the off-screen window was occluded. The device reported lost, nothing rendered, and the load screen stayed (`precache=60`) while the simulation ran. Screenshots and input were not checked in those runs.
+- No live model decisions were made; that is Task 7.
