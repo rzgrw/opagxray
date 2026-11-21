@@ -5,12 +5,18 @@ Launch flag: -xrsim_freeplay recorded|live. Without it this script registers not
 
 The engine (ai.freeplay.* verbs, reached through xrsim_verb) owns one AI decision owner per
 squad or squadless stalker/mutant. This script feeds it: a population snapshot every SYNC_MS,
-observations when an owner wakes, and events (arrived, blocked, casualty, sighting). It carries
-objectives out by setting the squad fields stock sim_squad_scripted already reads:
-scripted_target (a smart name, routes the squad through specific_update) and __lock (makes
-generic_update return early). Neither field is saved, so the claim lasts one session.
-Only squads whose writer is "sim" are ever written; companions, hostages, scripted and
-random-target squads are reported and left alone.
+observations when an owner wakes, and events (arrived, blocked, casualty, sighting).
+
+It carries objectives out at the one point where stock chooses a destination: while active it
+wraps simulation_board:get_squad_target (sim_board.script), which stock generic_update
+(sim_squad_scripted.script) calls when a squad needs a new target. For a squad it holds (writer
+"sim", enrolled, with an objective) the wrapper returns the objective's smart; every other call
+goes to the stock function unchanged. It never sets scripted_target or __lock, so stock
+population counts, tasks and reach rules see these squads as ordinary simulation squads. The only
+squad state it writes is a one-time reset when a new objective revision arrives, so that stock
+asks for a target at the squad's next update even mid-travel. Deactivation restores the stock
+function; squads finish their current travel and return to stock selection.
+Companions, hostages, scripted and random-target squads are reported and left alone.
 --]]
 
 local TICK_MS = 1000
@@ -38,13 +44,13 @@ local force_sync = false
 local first_sync_done = false
 
 local lone_cache = {}      -- list of object ids found by the last squadless scan
-local objectives = {}      -- [group id] = {rev, verb, site, blocked_rev, arrived_rev}
-local adapter_target = {}  -- [group id] = smart name this adapter wrote into scripted_target
-local adapter_lock = {}    -- [group id] = true when this adapter set __lock
+local objectives = {}      -- [group id] = {rev, verb, site, blocked_rev, arrived_rev, reset_rev}
 local enrolled = {}        -- [group id] = writer reported in the last sync
+local board_class          -- sim_board.simulation_board while the wrapper is installed
+local stock_target_fn      -- the stock simulation_board.get_squad_target
+local wrapper_fn           -- the installed wrapper
 local sight_pairs = {}     -- [observer id] = {[other id] = {armed, fired}} for damped sighting events
 local warned = {}          -- [key] = true once a warning was logged
-local smart_level = {}     -- [smart id] = level id (cached)
 
 ------------------------------------------------------------------------------------------------
 -- helpers
@@ -99,15 +105,6 @@ end
 local function smart_name(smart_id)
 	local entry = smart_id and SIMBOARD.smarts[smart_id]
 	return entry and entry.smrt and entry.smrt:name()
-end
-
-local function smart_level_id(smart)
-	local cached = smart_level[smart.id]
-	if cached == nil then
-		cached = level_id_of_vertex(smart.m_game_vertex_id) or false
-		smart_level[smart.id] = cached
-	end
-	return cached
 end
 
 local function species_of_clsid(cls)
@@ -193,7 +190,7 @@ local function writer_of(squad)
 	if commander and xrs_kill_wounded.hostage_list[commander] then
 		return "hostage"
 	end
-	if squad.scripted_target ~= nil and squad.scripted_target ~= adapter_target[id] then
+	if squad.scripted_target ~= nil then
 		return "script"
 	end
 	if squad.action_condlist then
@@ -208,21 +205,38 @@ local function writer_of(squad)
 	return "sim"
 end
 
--- Undo everything this adapter wrote into a squad. The objective is kept unless forget is set,
--- so a squad that is sim again later resumes it (the engine sends apply only on a new revision).
-local function release(squad, forget)
+-- True when the adapter carries this squad's objective out: it has an objective, the last sync
+-- enrolled it as sim, and it is still sim now. A squad that stops being sim keeps its objective,
+-- so it resumes it if it is sim again later (the engine sends apply only on a new revision).
+local function holds(squad)
 	local id = squad.id
-	if adapter_target[id] ~= nil and squad.scripted_target == adapter_target[id] then
-		squad.scripted_target = nil
+	return objectives[id] ~= nil and enrolled[id] == "sim" and writer_of(squad) == "sim"
+end
+
+local function is_hold(objective)
+	return objective.verb == "hold" or objective.site == "-"
+end
+
+-- The smart a held squad should target, chosen when stock asks for a target. A site objective
+-- gives its smart; move_to and retreat also need the smart to accept the squad (asked only for a
+-- smart the squad is not already assigned to, whose population counts the squad itself). A
+-- missing or refusing smart sends one blocked event per revision and falls back to a hold. A hold
+-- keeps the squad's assigned smart; with none it returns nil and stock runs its no-target path.
+local function objective_target(squad, objective)
+	if not is_hold(objective) then
+		local smart = SIMBOARD.smarts_by_names[objective.site]
+		local blocked = smart == nil or (objective.verb ~= "stay" and smart.id ~= squad.smart_id and
+			not precondition(smart, squad))
+		if not blocked then
+			return smart
+		end
+		if objective.blocked_rev ~= objective.rev then
+			objective.blocked_rev = objective.rev
+			call("ai.freeplay.event", squad.id .. " blocked " .. objective.site)
+		end
 	end
-	if adapter_lock[id] then
-		squad.__lock = nil
-	end
-	adapter_target[id] = nil
-	adapter_lock[id] = nil
-	if forget then
-		objectives[id] = nil
-	end
+	local entry = squad.smart_id and SIMBOARD.smarts[squad.smart_id]
+	return entry and entry.smrt or nil
 end
 
 ------------------------------------------------------------------------------------------------
@@ -361,9 +375,6 @@ local function sync(now)
 		local group = describe(squad)
 		if group then
 			local writer = writer_of(squad)
-			if writer ~= "sim" and enrolled[id] == "sim" then
-				release(squad, false)
-			end
 			now_enrolled[id] = writer
 			groups[#groups + 1] = group
 			lines[#lines + 1] = string.format("group %d %s %s %s %s %s %s %s %d", id, squad:name(), group.species,
@@ -380,8 +391,6 @@ local function sync(now)
 	for id in pairs(enrolled) do
 		if now_enrolled[id] == nil then
 			objectives[id] = nil
-			adapter_target[id] = nil
-			adapter_lock[id] = nil
 		end
 	end
 	enrolled = now_enrolled
@@ -426,28 +435,20 @@ local function observe(owner_id, group_id, membership_revision)
 		return   -- gone since the last sync; the engine times the wake out
 	end
 
+	-- Sites: the squad's current smart first, then the smarts on any level that accept it (stock
+	-- selection is cross-level too), nearest first. Distance is the one stock ranks simulation
+	-- targets by (simulation_objects.sim_dist_to: game-graph points, comparable across levels).
 	local sites = {}
 	local current = squad.smart_id and SIMBOARD.smarts[squad.smart_id]
 	for smart_id, entry in pairs(SIMBOARD.smarts) do
 		local smart = entry.smrt
-		if smart and (smart_id == squad.smart_id or
-			(smart_level_id(smart) == group.level_id and precondition(smart, squad))) then
-			sites[#sites + 1] = {smart = smart, distance = squad.position:distance_to(smart.position)}
+		if smart and smart_id ~= squad.smart_id and smart.locked ~= true and precondition(smart, squad) then
+			sites[#sites + 1] = {smart = smart, distance = simulation_objects.sim_dist_to(smart, squad)}
 		end
 	end
 	table.sort(sites, function(a, b) return a.distance < b.distance end)
-	if current and #sites > MAX_SITES then
-		local kept = false
-		for i = 1, MAX_SITES do
-			kept = kept or sites[i].smart.id == current.smrt.id
-		end
-		if not kept then
-			for i = MAX_SITES + 1, #sites do
-				if sites[i].smart.id == current.smrt.id then
-					sites[MAX_SITES] = sites[i]
-				end
-			end
-		end
+	if current and current.smrt then
+		table.insert(sites, 1, {smart = current.smrt, distance = simulation_objects.sim_dist_to(current.smrt, squad)})
 	end
 
 	local sightings = {}
@@ -472,7 +473,7 @@ local function observe(owner_id, group_id, membership_revision)
 	}
 	for i = 1, math.min(#sites, MAX_SITES) do
 		local smart = sites[i].smart
-		lines[#lines + 1] = string.format("site %s %d %s %d", smart:name(), round(sites[i].distance), site_kind(smart),
+		lines[#lines + 1] = string.format("site %s %d %s %d", smart:name(), math.max(0, round(sites[i].distance)), site_kind(smart),
 			SIMBOARD:get_smart_population(smart) or 0)
 	end
 	for i = 1, math.min(#sightings, MAX_SIGHTINGS) do
@@ -508,7 +509,11 @@ local function tick(now)
 		else
 			local group_id, rev, verb, site = string.match(line, "^apply %d+ (%d+) (%d+) (%S+) (%S+) %S+$")
 			if group_id then
-				objectives[tonumber(group_id)] = {rev = tonumber(rev), verb = verb, site = site}
+				local id, revision = tonumber(group_id), tonumber(rev)
+				local known = objectives[id]
+				if not (known and known.rev == revision) then
+					objectives[id] = {rev = revision, verb = verb, site = site}
+				end
 			else
 				warn_once("line:" .. line, "unknown tick line: " .. line)
 			end
@@ -518,6 +523,62 @@ end
 
 local deactivate   -- defined with the registration helpers below
 
+-- The installed get_squad_target: the objective's smart for a held squad, the stock function
+-- with the caller's arguments for everyone else. An error switches the adapter off (which puts
+-- the stock function back) and the call is answered by stock.
+local function wrapped_get_squad_target(board, squad, ...)
+	local stock = stock_target_fn
+	if active and not failed then
+		local ok, held, target = pcall(function()
+			local objective = objectives[squad.id]
+			if objective and holds(squad) then
+				return true, objective_target(squad, objective)
+			end
+			return false
+		end)
+		if not ok then
+			deactivate("! xrsim_freeplay: lua error in get_squad_target: " .. tostring(held))
+		elseif held then
+			return target
+		end
+	end
+	return stock(board, squad, ...)
+end
+
+-- nil when stock target selection is not where the adapter expects it.
+local function stock_board_class()
+	local class = type(sim_board) == "table" and sim_board.simulation_board
+	if class and type(class.get_squad_target) == "function" then
+		return class
+	end
+	return nil
+end
+
+-- Class-level: the existing SIMBOARD instance resolves its methods through the class.
+local function install_wrapper(class)
+	board_class = class
+	stock_target_fn = class.get_squad_target
+	wrapper_fn = wrapped_get_squad_target
+	class.get_squad_target = wrapper_fn
+end
+
+-- Puts the stock function back unless something replaced the wrapper since; returns a word for
+-- the log line.
+local function restore_stock()
+	if not board_class then
+		return "not installed"
+	end
+	local result = "restored"
+	if board_class.get_squad_target == wrapper_fn then
+		board_class.get_squad_target = stock_target_fn
+	else
+		result = "replaced by another script, left as is"
+	end
+	board_class = nil
+	wrapper_fn = nil
+	return result
+end
+
 local function on_actor_update()
 	local now = time_global()
 	if now < next_tick then
@@ -525,11 +586,11 @@ local function on_actor_update()
 	end
 	next_tick = now + TICK_MS
 	if now >= next_sync then
-		-- The engine can be switched off mid-session (ai.freeplay.mode off): then nothing may
-		-- keep writing squads on its behalf.
+		-- The engine can be switched off mid-session (ai.freeplay.mode off): then the adapter
+		-- hands target selection back to stock.
 		local _, current = call("ai.freeplay.mode", "")
 		if current == "mode=off" then
-			deactivate("xrsim_freeplay: engine mode is off, adapter released its squads and stopped")
+			deactivate("xrsim_freeplay: engine mode is off, adapter stopped")
 			return
 		end
 	end
@@ -540,6 +601,14 @@ local function on_actor_update()
 end
 
 local function on_first_update()
+	local class = stock_board_class()
+	if not class then
+		failed = true
+		local reason = "stock sim_board.simulation_board.get_squad_target not found, adapter stays off"
+		emit("! xrsim_freeplay: " .. reason)
+		SetHudMsg("xrsim_freeplay: " .. reason, 10)
+		return false
+	end
 	local ok, text = call("ai.freeplay.mode", mode)
 	if not ok then
 		failed = true
@@ -555,6 +624,7 @@ local function on_first_update()
 		return false
 	end
 	log_info(text .. " " .. epoch)
+	install_wrapper(class)
 	active = true
 	local now = time_global()
 	scan_lone(now)
@@ -563,69 +633,49 @@ local function on_first_update()
 	return true
 end
 
+-- Stock fires squad_on_update inside sim_squad_scripted:update right before it runs
+-- generic_update for a squad without a script target, so a reset made here is acted on in the
+-- same update.
 local function on_squad_update(squad)
 	local objective = objectives[squad.id]
-	if not objective then
-		return
-	end
-	if writer_of(squad) ~= "sim" then
-		release(squad, false)
+	if not (objective and holds(squad)) then
 		return
 	end
 	local id = squad.id
 
-	if objective.verb == "hold" or objective.site == "-" then
-		local current = smart_name(squad.smart_id)
-		if current then
-			squad.scripted_target = current
-			adapter_target[id] = current
-			if adapter_lock[id] then
-				squad.__lock = nil
-				adapter_lock[id] = nil
-			end
+	-- A new revision: once, make stock generic_update skip its keep-current-target branch and go
+	-- straight to "Find a new target" (sim_squad_scripted.script generic_update): that branch runs
+	-- only while current_action is set, and __lock makes the update return before it. Nothing is
+	-- reset when the squad already targets the objective's smart (no churn for an unchanged stay or
+	-- for a hold, which keeps the assigned smart).
+	if objective.reset_rev ~= objective.rev then
+		objective.reset_rev = objective.rev
+		local wanted
+		if is_hold(objective) then
+			wanted = squad.smart_id
 		else
-			if adapter_target[id] ~= nil and squad.scripted_target == adapter_target[id] then
-				squad.scripted_target = nil
-			end
-			adapter_target[id] = nil
-			squad.__lock = true
-			adapter_lock[id] = true
+			local smart = SIMBOARD.smarts_by_names[objective.site]
+			wanted = smart and smart.id
 		end
-		return
-	end
-
-	local smart = SIMBOARD.smarts_by_names[objective.site]
-	if squad.scripted_target ~= objective.site then
-		-- A squad already assigned to the smart counts towards its population, so the
-		-- precondition is only asked for a destination the squad does not already hold.
-		local blocked = smart == nil or (objective.verb ~= "stay" and smart.id ~= squad.smart_id and
-			not precondition(smart, squad))
-		if blocked then
-			if objective.blocked_rev ~= objective.rev then
-				objective.blocked_rev = objective.rev
-				call("ai.freeplay.event", id .. " blocked " .. objective.site)
-			end
-			return
-		end
-		squad.scripted_target = objective.site
-		adapter_target[id] = objective.site
-		if adapter_lock[id] then
+		if not (wanted ~= nil and squad.current_action ~= nil and squad.assigned_target_id == wanted) then
+			squad.current_action = nil
 			squad.__lock = nil
-			adapter_lock[id] = nil
 		end
 	end
 
-	if smart and squad.current_action == 1 and squad.current_target_id == smart.id and
-		objective.arrived_rev ~= objective.rev then
-		objective.arrived_rev = objective.rev
-		call("ai.freeplay.event", id .. " arrived " .. objective.site)
+	if not is_hold(objective) and objective.arrived_rev ~= objective.rev and squad.current_action == 1 then
+		local smart = SIMBOARD.smarts_by_names[objective.site]
+		if smart and squad.current_target_id == smart.id then
+			objective.arrived_rev = objective.rev
+			call("ai.freeplay.event", id .. " arrived " .. objective.site)
+		end
 	end
 end
 
 local function on_squad_unregister(squad)
 	local id = squad.id
 	call("ai.freeplay.retire", tostring(id))
-	release(squad, true)
+	objectives[id] = nil
 	enrolled[id] = nil
 	sight_pairs[id] = nil
 end
@@ -649,39 +699,17 @@ local function unregister_all()
 	registered = {}
 end
 
--- Switches the adapter off for the session: hands every squad it wrote back to stock code
--- (release only clears values the adapter itself set), forgets all objectives and
--- unregisters the callbacks. Each squad is released in its own pcall, so one broken squad
--- (or a broken SIMBOARD) cannot keep the others pinned.
+-- Switches the adapter off for the session: puts stock target selection back, forgets all
+-- objectives and unregisters the callbacks. The adapter leaves no field in any squad (the
+-- one-time reset only clears stock fields that stock itself sets again), so squads finish their
+-- current travel and then choose targets the stock way.
 deactivate = function(line)
 	failed = true
 	active = false
-	local ids = {}
-	for id in pairs(adapter_target) do
-		ids[id] = true
-	end
-	for id in pairs(adapter_lock) do
-		ids[id] = true
-	end
-	local released = 0
-	for id in pairs(ids) do
-		local ok = pcall(function()
-			local squad = (SIMBOARD and SIMBOARD.squads and SIMBOARD.squads[id]) or alife_object(id)
-			if squad then
-				release(squad, true)
-				released = released + 1
-			end
-		end)
-		if not ok then
-			adapter_target[id] = nil
-			adapter_lock[id] = nil
-		end
-	end
-	adapter_target = {}
-	adapter_lock = {}
+	local ok, restored = pcall(restore_stock)
 	objectives = {}
 	unregister_all()
-	emit(line .. " (released " .. released .. " squads)")
+	emit(line .. " (stock target selection " .. (ok and restored or "restore failed: " .. tostring(restored)) .. ")")
 end
 
 -- A Lua error in a callback is logged once and switches the adapter off for the session,
