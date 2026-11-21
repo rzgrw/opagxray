@@ -469,12 +469,23 @@ local function tick(now)
 	end
 end
 
+local deactivate   -- defined with the registration helpers below
+
 local function on_actor_update()
 	local now = time_global()
 	if now < next_tick then
 		return
 	end
 	next_tick = now + TICK_MS
+	if now >= next_sync then
+		-- The engine can be switched off mid-session (ai.freeplay.mode off): then nothing may
+		-- keep writing squads on its behalf.
+		local _, current = call("ai.freeplay.mode", "")
+		if current == "mode=off" then
+			deactivate("xrsim_freeplay: engine mode is off, adapter released its squads and stopped")
+			return
+		end
+	end
 	if force_sync or now >= next_sync then
 		sync(now)
 	end
@@ -591,6 +602,41 @@ local function unregister_all()
 	registered = {}
 end
 
+-- Switches the adapter off for the session: hands every squad it wrote back to stock code
+-- (release only clears values the adapter itself set), forgets all objectives and
+-- unregisters the callbacks. Each squad is released in its own pcall, so one broken squad
+-- (or a broken SIMBOARD) cannot keep the others pinned.
+deactivate = function(line)
+	failed = true
+	active = false
+	local ids = {}
+	for id in pairs(adapter_target) do
+		ids[id] = true
+	end
+	for id in pairs(adapter_lock) do
+		ids[id] = true
+	end
+	local released = 0
+	for id in pairs(ids) do
+		local ok = pcall(function()
+			local squad = (SIMBOARD and SIMBOARD.squads and SIMBOARD.squads[id]) or alife_object(id)
+			if squad then
+				release(squad, true)
+				released = released + 1
+			end
+		end)
+		if not ok then
+			adapter_target[id] = nil
+			adapter_lock[id] = nil
+		end
+	end
+	adapter_target = {}
+	adapter_lock = {}
+	objectives = {}
+	unregister_all()
+	emit(line .. " (released " .. released .. " squads)")
+end
+
 -- A Lua error in a callback is logged once and switches the adapter off for the session,
 -- so it never repeats every frame.
 local function guarded(name, body, needs_active)
@@ -600,10 +646,7 @@ local function guarded(name, body, needs_active)
 		end
 		local ok, result = pcall(body, ...)
 		if not ok then
-			failed = true
-			active = false
-			emit("! xrsim_freeplay: lua error in " .. name .. ": " .. tostring(result))
-			unregister_all()
+			deactivate("! xrsim_freeplay: lua error in " .. name .. ": " .. tostring(result))
 		elseif result == false then
 			unregister_all()
 		end
