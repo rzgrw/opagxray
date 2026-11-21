@@ -10,6 +10,8 @@
 # exclude binaries and temporary files
 [Bb]in/
 [Bb]uild*/
+# CMake configure log of tools/xrsim_standalone/build_and_test.sh (<build-dir>.cmake.log, default build-xrsim)
+build-xrsim.cmake.log
 artifacts/
 __pycache__/
 *.pyc

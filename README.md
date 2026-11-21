@@ -176,7 +176,7 @@ The bridge lets a script or agent run, control and screenshot the game. Protocol
 | `-agent_bridge_port <n>` | Windows: TCP port on 127.0.0.1; `0` or absent lets the OS pick. The bound port goes to `<appdata>/agent_bridge.port` |
 | `-agent_background` | Unattended instance: no focus, off-screen, windowed, no audio, no pause on focus loss, no error dialogs |
 | `-agent_sound` | With `-agent_background`: open the audio device anyway (silence it with `snd_volume_eff 0.` / `snd_volume_music 0.` in `user.ltx`); needed for long CoC sessions |
-| `-xrsim_freeplay recorded\|live` | Experimental, branch `feat/freeplay-population-ai`, CoC runtime with the adapter installed by `tools/freeplay_runtime.py`: one AI decision owner per freeplay squad, mutant pack and squadless NPC. `recorded` takes decisions only from `ai.freeplay.decide`; `live` wakes owners through the provider below and **has not been exercised yet**. Status: [PLAN_STATUS](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21) |
+| `-xrsim_freeplay recorded\|live` | Experimental, CoC runtime with the adapter installed by `tools/freeplay_runtime.py`: one AI decision owner per freeplay squad, mutant pack and squadless NPC. `recorded` takes decisions only from `ai.freeplay.decide`; `live` wakes owners through the provider below and **has not been exercised yet**. Status: [PLAN_STATUS](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21) |
 
 `agentctl.py` accepts a Unix socket path, `tcp:HOST:PORT`, an `agent_bridge.port` file, or an appdata directory containing one. `--wait S` retries until the instance is up.
 
@@ -236,7 +236,7 @@ export XRAY_AGENT_TIMEOUT_MS=5000
 
 Missing curl, keys or network return coast values such as `network_adapter_not_linked` or `missing_api_key`; they are never fatal.
 
-Experimental freeplay live mode (`-xrsim_freeplay live`, see the options table) uses the same `XRAY_AGENT_PROVIDER`, `XRAY_AGENT_MODEL` and `ANTHROPIC_API_KEY` (or `XRAY_AGENT_API_KEY`). It refuses to start without them (`provider_disabled`, `missing_api_key`, `transport_unavailable`) and has not been run with a model yet; only recorded mode has live evidence.
+Experimental freeplay live mode (`-xrsim_freeplay live`, see the options table) uses the same `XRAY_AGENT_PROVIDER`, `XRAY_AGENT_MODEL` and `ANTHROPIC_API_KEY` (or `XRAY_AGENT_API_KEY`). It needs `XRAY_AGENT_PROVIDER=anthropic` (the default when unset), an API key and an explicit `XRAY_AGENT_MODEL`, and refuses to start otherwise, in this order: `provider_disabled`, `missing_api_key`, `missing_model` (the source default model ID is not used), `transport_unavailable`. Set `XRAY_AGENT_TIMEOUT_MS` deliberately for a live run. It has not been run with a model yet; only recorded mode has live evidence.
 
 ## Tests and Verification
 
