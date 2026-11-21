@@ -7,6 +7,7 @@
 #include "xrSim/xrSimFreeplayDecision.h"
 #include "xrSim/xrSimFreeplayScheduler.h"
 
+#include <cstdlib>
 #include <map>
 #include <set>
 #include <sstream>
@@ -141,7 +142,8 @@ std::string BindingText(const FreeplayOwner& owner)
 
 AgentProviderConfig LiveConfig() { return LoadAgentProviderConfigFromEnvironment(); }
 
-// Empty when live mode may start.
+// Empty when live mode may start. The model must be named in XRAY_AGENT_MODEL: the provider's built-in
+// default model ID is a historical value that needs verification before any live use.
 std::string LiveModeRefusal()
 {
     if (g_freeplayTestProvider)
@@ -151,6 +153,9 @@ std::string LiveModeRefusal()
         return "provider_disabled";
     if (config.apiKey.empty())
         return "missing_api_key";
+    const char* model = std::getenv("XRAY_AGENT_MODEL");
+    if (model == nullptr || *model == '\0')
+        return "missing_model";
     if (!IsAnthropicHttpTransportAvailable())
         return "transport_unavailable";
     return std::string();
@@ -176,7 +181,16 @@ FreeplayLedgerEntry DecisionEntry(uint64_t ownerId, const StoredObservation& sto
     return entry;
 }
 
-// Commits a verdict and returns the ledger verdict: accepted, kept, or why nothing changed.
+void StoreMemories(uint64_t ownerId, const FreeplayVerdict& verdict)
+{
+    // Memories are single tokens from the intent parser; AddMemory drops anything else.
+    for (const std::string& memory : verdict.memories)
+        g_freeplay.population.AddMemory(ownerId, memory);
+}
+
+// Commits a verdict and returns the ledger verdict: accepted, kept, or why nothing changed. A verdict
+// equal to the owner's current objective (same verb and site) is kept: no new revision, so the adapter
+// sees no new objective, and memories are still stored.
 std::string ApplyVerdict(uint64_t ownerId, const FreeplayVerdict& verdict, FreeplayObjectiveSource source)
 {
     if (!verdict.ok)
@@ -185,13 +199,16 @@ std::string ApplyVerdict(uint64_t ownerId, const FreeplayVerdict& verdict, Freep
         return "kept";
     const FreeplayOwner* owner = g_freeplay.population.FindOwner(ownerId);
     const FreeplayObjective previous = owner != nullptr ? owner->objective : FreeplayObjective();
+    if (owner != nullptr && previous.verb == verdict.verb && previous.site == verdict.site)
+    {
+        StoreMemories(ownerId, verdict);
+        return "kept";
+    }
     const FreeplayResult set = g_freeplay.population.SetObjective(ownerId, verdict.verb, verdict.site, source);
     if (!set.ok)
         return set.reason;
     g_freeplay.previousObjective[ownerId] = previous;
-    // Memories are single tokens from the intent parser; AddMemory drops anything else.
-    for (const std::string& memory : verdict.memories)
-        g_freeplay.population.AddMemory(ownerId, memory);
+    StoreMemories(ownerId, verdict);
     return "accepted";
 }
 
@@ -201,26 +218,38 @@ void SettleReply(const PendingRequest& request, const ActorWakePollResult& polle
     FreeplayLedgerEntry entry = DecisionEntry(request.ownerId, request.stored, "live");
     entry.provider = result.provider;
     entry.model = result.model;
-    // A coast with a reason comes from the provider (disabled, transport, HTTP), not from the model:
-    // it is a provider failure. Only a reasonless coast is the model choosing to keep its objective.
-    if (!polled.ok || !result.ok || !result.coastReason.empty())
+    if (request.epoch != g_freeplay.population.Epoch())
+    {
+        // The owner belonged to a world dropped by begin; the scheduler was reset with it. Whatever the
+        // reply (success or failure), it has no scheduler effect.
+        entry.verdict = "stale_world";
+        g_freeplay.ledger.Append(entry);
+        return;
+    }
+    // Failures, as xrSimActorProvider.cpp represents them:
+    // * the queue itself failed (Poll not ok): a hold, with backoff;
+    // * a coast with a reason comes from the provider (disabled, unsupported provider, missing key,
+    //   adapter not linked, transport error, HTTP status), not from the model: a hold, with backoff;
+    // * otherwise ok=false is a reply whose body or text did not decode or parse: the model
+    //   answered, badly. It is a live decision that changes nothing (malformed:<reason>), and only this
+    //   owner waits its minimum wake interval: no global backoff.
+    // Only a reasonless coast is the model choosing to keep its objective.
+    if (!polled.ok || !result.coastReason.empty())
     {
         entry.source = "hold";
         if (!polled.ok)
             entry.verdict = polled.reason;
-        else if (!result.ok)
-            entry.verdict = result.error.empty() ? "provider_error" : result.error;
         else
             entry.verdict = result.error.empty() ? result.coastReason : result.coastReason + ":" + result.error;
         g_freeplay.ledger.Append(entry);
         g_freeplay.scheduler.OnDecision(request.ownerId, true, g_freeplay.nowMs);
         return;
     }
-    if (request.epoch != g_freeplay.population.Epoch())
+    if (!result.ok)
     {
-        // The owner belonged to a world dropped by begin; the scheduler was reset with it.
-        entry.verdict = "stale_world";
+        entry.verdict = "malformed:" + (result.error.empty() ? std::string("provider_error") : result.error);
         g_freeplay.ledger.Append(entry);
+        g_freeplay.scheduler.OnDecision(request.ownerId, false, g_freeplay.nowMs);
         return;
     }
     const FreeplayVerdict verdict =
@@ -315,8 +344,11 @@ std::string Begin(const std::string& payload, bool& ok)
     if (!Tokens(payload).empty())
         return Fail(ok, "usage: ai.freeplay.begin");
     const uint32_t epoch = g_freeplay.population.BeginWorld();
-    // Game time restarts on a load, so no scheduler deadline survives. Pending provider requests stay
-    // tracked only so their replies drain; they carry the old epoch and settle as stale_world.
+    // A new world (a load or a new game) starts from a clean scheduler: no wake, minimum interval or
+    // backoff of the old world's owners carries over. (now_ms is the adapter's time_global(), the engine's
+    // global timer, which keeps running across a load; the reset is about the owners, not the clock.)
+    // Pending provider requests stay tracked only so their replies drain; they carry the old epoch and
+    // settle as stale_world.
     g_freeplay.scheduler.Reset();
     g_freeplay.handedOut.clear();
     g_freeplay.observations.clear();
@@ -499,9 +531,9 @@ std::string Decide(const std::string& payload, bool& ok)
     entry.site = verdict.ok ? verdict.site : action.target;
     entry.verdict = ApplyVerdict(ownerId, verdict, FreeplayObjectiveSource::Recorded);
     g_freeplay.ledger.Append(entry);
-    if (entry.verdict != "accepted")
+    if (entry.verdict != "accepted" && entry.verdict != "kept")
         return Fail(ok, entry.verdict);
-    return Succeed(ok, "accepted " + verdict.verb + " " + verdict.site);
+    return Succeed(ok, entry.verdict + " " + verdict.verb + " " + verdict.site);
 }
 
 std::string Tick(const std::string& payload, bool& ok)

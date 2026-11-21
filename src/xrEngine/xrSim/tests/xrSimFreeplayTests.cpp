@@ -518,6 +518,18 @@ bool TestWakePromptListsSitesAndRules()
         "site_name_must_be_listed\n", "response_first_line xrsim_actor_intent_v1\n", "response_alternative coast\n"};
     for (const char* line : expectedLines)
         ok = Expect(prompt.find(line) != std::string::npos, (std::string("prompt line ") + line).c_str()) && ok;
+    // Field names and units come before the first site and sighting line.
+    const char* schemaLines[] = {"site_fields name graph_distance kind occupants\n",
+        "site_graph_distance game_graph_distance_stock_ranks_targets_by_not_metres\n",
+        "sighting_fields name species faction count distance_m relation\n", "sighting_distance_m metres\n"};
+    const size_t firstSite = prompt.find("\nsite esc_smart_a ");
+    const size_t firstSighting = prompt.find("\nsighting esc_dogs ");
+    for (const char* line : schemaLines)
+    {
+        const size_t at = prompt.find(line);
+        ok = Expect(at != std::string::npos && at < firstSite && at < firstSighting,
+            (std::string("schema line before the observation: ") + line).c_str()) && ok;
+    }
     ok = Expect(prompt.find("adjust_population") == std::string::npos &&
             prompt.find("<legal_tool>") == std::string::npos,
         "prompt drops the actor tool lines") && ok;
@@ -942,15 +954,24 @@ std::string RequireVerb(const std::string& verb, const std::string& payload = st
 
 bool Contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
 
-void ClearProviderEnvironment()
+void SetEnvironment(const char* name, const char* value)
 {
 #if defined(_WIN32)
-    _putenv_s("XRAY_AGENT_API_KEY", "");
-    _putenv_s("ANTHROPIC_API_KEY", "");
+    _putenv_s(name, value != nullptr ? value : "");
 #else
-    unsetenv("XRAY_AGENT_API_KEY");
-    unsetenv("ANTHROPIC_API_KEY");
+    if (value != nullptr)
+        setenv(name, value, 1);
+    else
+        unsetenv(name);
 #endif
+}
+
+// Every variable the live provider reads, so no test depends on the developer's environment.
+void ClearProviderEnvironment()
+{
+    for (const char* name :
+        {"XRAY_AGENT_PROVIDER", "XRAY_AGENT_MODEL", "XRAY_AGENT_API_KEY", "ANTHROPIC_API_KEY", "XRAY_AGENT_TIMEOUT_MS"})
+        SetEnvironment(name, nullptr);
 }
 
 // Fresh freeplay runtime in the given mode with kTwoGroups enrolled (owners 1..3 in epoch 1).
@@ -995,6 +1016,49 @@ public:
 
 private:
     std::string m_reason;
+};
+
+// Answers every wake as the Anthropic provider answers a reply whose text does not decode or parse:
+// ok=false with the parser's reason and no coast reason (xrSimActorProvider.cpp FailActor).
+class MalformedProvider final : public xrSim::IActorIntentProvider
+{
+public:
+    xrSim::ActorProviderResult Wake(const xrSim::ActorWakeContext&) override
+    {
+        xrSim::ActorProviderResult result;
+        result.provider = "test-malformed";
+        result.model = "fixture";
+        result.error = "invalid action record";
+        return result;
+    }
+};
+
+// Replies from a script in order and keeps every prompt it was sent.
+class CapturingProvider final : public xrSim::IActorIntentProvider
+{
+public:
+    CapturingProvider(std::vector<std::string> replies, std::shared_ptr<std::vector<std::string>> prompts)
+        : m_replies(std::move(replies)), m_prompts(std::move(prompts))
+    {
+    }
+    xrSim::ActorProviderResult Wake(const xrSim::ActorWakeContext& context) override
+    {
+        m_prompts->push_back(context.prompt);
+        const std::string reply = m_cursor < m_replies.size() ? m_replies[m_cursor++] : std::string();
+        xrSim::ActorProviderResult result;
+        const xrSim::ActorIntentParseResult parsed = xrSim::ParseActorIntentPlan(reply);
+        result.ok = parsed.ok;
+        result.error = parsed.reason;
+        result.plan = parsed.plan;
+        result.provider = "test-capture";
+        result.model = "fixture";
+        return result;
+    }
+
+private:
+    std::vector<std::string> m_replies;
+    size_t m_cursor = 0;
+    std::shared_ptr<std::vector<std::string>> m_prompts;
 };
 
 // Ticks at nowMs until the ledger contains needle; returns every tick line seen.
@@ -1111,17 +1175,133 @@ bool TestStaleReplyAfterSplit()
                ("objective unchanged after split: " + OwnerLine(1)).c_str()) && ok;
 }
 
-bool TestProviderErrorHolds()
+// A provider result with ok=false is a reply that did not decode or parse: malformed, not a hold.
+bool TestFailedProviderResultIsMalformed()
 {
     StartLive({});
     RequireVerb("ai.freeplay.tick", "0");
     RequireVerb("ai.freeplay.observe", kSquadObservation);
-    const std::string ticks = TickUntilLogged("source=hold", 1);
-    bool ok = Expect(!Contains(ticks, "apply 1 "), "provider error applies nothing");
+    const std::string ticks = TickUntilLogged("verdict=malformed", 1);
+    bool ok = Expect(!Contains(ticks, "apply 1 "), "failed result applies nothing");
     ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=bootstrap rev=1"),
         "objective and revision unchanged") && ok;
-    return Expect(Contains(RequireVerb("ai.freeplay.log"), "verdict=recorded_actor_provider_exhausted"),
-               "provider error is the verdict") && ok;
+    const std::string log = RequireVerb("ai.freeplay.log");
+    ok = Expect(!Contains(log, "source=hold"), ("failed result is not a hold: " + log).c_str()) && ok;
+    return Expect(Contains(log, "source=live verdict=malformed:recorded_actor_provider_exhausted "),
+               ("the provider's reason is the verdict: " + log).c_str()) && ok;
+}
+
+// Five squads: tick 0 hands out owners 1 and 2; owner 1 observes and gets a malformed reply.
+bool TestMalformedReplyDoesNotBackOff()
+{
+    StartLiveWith(std::make_unique<MalformedProvider>(), FiveSquads());
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.tick", "1");
+    RequireVerb("ai.freeplay.observe", ObservationFor(1, 1, 1, 0));
+    const std::string ticks = TickUntilLogged("verdict=malformed", 1);
+    const std::string log = RequireVerb("ai.freeplay.log");
+    bool ok = Expect(Contains(log, "ownerId=1 epoch=1 membershipRevision=1 wakeReason=spawn source=live "
+                                   "verdict=malformed:invalid_action_record verb=- site=- provider=test-malformed "
+                                   "model=fixture "),
+        ("malformed reply ledger line: " + log).c_str());
+    ok = Expect(!Contains(log, "source=hold"), "malformed reply is not a hold") && ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=hold:- source=none rev=0"), "objective unchanged") && ok;
+    ok = Expect(Contains(OwnerLine(1), "state=idle "), ("malformed owner waits idle: " + OwnerLine(1)).c_str()) && ok;
+    return Expect(Contains(ticks, "observe 3 "), ("no backoff: next owner handed out at once: " + ticks).c_str()) &&
+        ok;
+}
+
+// A reply for a world dropped by begin is stale_world before anything else: a failing reply from the
+// old world is not a hold and starts no backoff.
+bool TestFailedReplyAfterBeginIsStale()
+{
+    StartLiveWith(std::make_unique<CoastProvider>("transport_error"), FiveSquads());
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", ObservationFor(1, 1, 1, 0));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));   // the worker answers at once
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", FiveSquads());   // owners 6..10 in epoch 2
+    const std::string tick = RequireVerb("ai.freeplay.tick", "0");
+    const std::string log = RequireVerb("ai.freeplay.log");
+    bool ok = Expect(Contains(log, "ownerId=1 epoch=1 membershipRevision=1 wakeReason=spawn source=live "
+                                   "verdict=stale_world "),
+        ("old world's failed reply is stale_world: " + log).c_str());
+    ok = Expect(!Contains(log, "source=hold"), ("old world's failed reply is not a hold: " + log).c_str()) && ok;
+    return Expect(Contains(tick, "observe 6 group 500 1\n") && Contains(tick, "observe 7 group 501 1\n"),
+               ("no backoff: the new world is handed out in the same tick: " + tick).c_str()) && ok;
+}
+
+void DecideMoveToC();
+
+// The objective owner 1 holds after a recorded move to esc_smart_c: rev 2, no apply line pending.
+bool TestIdenticalRecordedDecisionIsKept()
+{
+    DecideMoveToC();
+    const VerbReply again = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    bool ok = Expect(again.ok && again.text == "kept move_to esc_smart_c", ("identical decide: " + again.text).c_str());
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_c source=recorded rev=2 "),
+        ("identical decision keeps the revision: " + OwnerLine(1)).c_str()) && ok;
+    ok = Expect(!Contains(RequireVerb("ai.freeplay.tick", "2"), "apply 1 "), "identical decision applies nothing") &&
+        ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.log"), "source=recorded verdict=kept verb=move_to site=esc_smart_c "),
+        "identical decision ledgered as kept") && ok;
+
+    const VerbReply stay = Verb("ai.freeplay.decide", "1 stay");
+    ok = Expect(stay.ok && stay.text == "accepted stay esc_smart_a", ("stay commits: " + stay.text).c_str()) && ok;
+    const VerbReply stayAgain = Verb("ai.freeplay.decide", "1 stay");
+    ok = Expect(stayAgain.ok && stayAgain.text == "kept stay esc_smart_a", ("second stay: " + stayAgain.text).c_str()) &&
+        ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=stay:esc_smart_a source=recorded rev=3 "),
+        ("second stay keeps the revision: " + OwnerLine(1)).c_str()) && ok;
+    const std::string tick = RequireVerb("ai.freeplay.tick", "3");
+    ok = Expect(Contains(tick, "apply 1 500 3 stay esc_smart_a recorded\n") && !Contains(tick, "apply 1 500 4"),
+        ("one apply line for the two stays: " + tick).c_str()) && ok;
+
+    const VerbReply other = Verb("ai.freeplay.decide", "1 move_to esc_smart_b");
+    ok = Expect(other.ok && other.text == "accepted move_to esc_smart_b", ("other site commits: " + other.text).c_str()) &&
+        ok;
+    return Expect(Contains(RequireVerb("ai.freeplay.tick", "4"), "apply 1 500 4 move_to esc_smart_b recorded\n"),
+               "a different site raises the revision") && ok;
+}
+
+// A live reply equal to the current objective is kept: same revision, no apply line, memories stored.
+bool TestIdenticalLiveDecisionIsKeptWithMemories()
+{
+    auto prompts = std::make_shared<std::vector<std::string>>();
+    const char* move = "xrsim_actor_intent_v1\naction move_to esc_smart_c\nmemory first_note\nend\n";
+    const char* again = "xrsim_actor_intent_v1\naction move_to esc_smart_c\nmemory second_note\nend\n";
+    StartLiveWith(std::make_unique<CapturingProvider>(std::vector<std::string>{move, again, move}, prompts), kTwoGroups);
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    bool ok = Expect(Contains(TickUntilLogged("verdict=accepted", 1), "apply 1 500 2 move_to esc_smart_c live\n"),
+        "first live move applied at rev 2");
+
+    RequireVerb("ai.freeplay.wake", "1 probe");
+    ok = Expect(Contains(RequireVerb("ai.freeplay.tick", "50000"), "observe 1 group 500 1\n"), "owner 1 woken again") && ok;
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    const std::string ticks = TickUntilLogged("verdict=kept", 50000);
+    ok = Expect(!Contains(ticks, "apply 1 "), ("identical live reply applies nothing: " + ticks).c_str()) && ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.log"), "source=live verdict=kept verb=move_to site=esc_smart_c "),
+        "identical live reply ledgered as kept") && ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_c source=live rev=2 "),
+        ("identical live reply keeps the revision: " + OwnerLine(1)).c_str()) && ok;
+
+    RequireVerb("ai.freeplay.wake", "1 probe");
+    RequireVerb("ai.freeplay.tick", "100000");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    for (int i = 0; i < 200; ++i)   // until the third reply settles: the provider has seen the third prompt
+    {
+        RequireVerb("ai.freeplay.tick", "100000");
+        const std::string log = RequireVerb("ai.freeplay.log");
+        size_t kept = 0;
+        for (size_t at = log.find("verdict=kept"); at != std::string::npos; at = log.find("verdict=kept", at + 1))
+            ++kept;
+        if (kept == 2)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return Expect(prompts->size() == 3 && Contains((*prompts)[2], "memory first_note\nmemory second_note\n"),
+               "the kept reply's memory is stored") && ok;
 }
 
 // Five squads: tick 0 hands out owners 1 and 2; owner 1 observes at 1 and its reply drains at 1.
@@ -1162,11 +1342,39 @@ bool TestLiveModeRefusedWithoutProvider()
     ClearProviderEnvironment();
     RequireVerb("ai.reset");
     const VerbReply live = Verb("ai.freeplay.mode", "live");
-    bool ok = Expect(!live.ok && (live.text == "provider_disabled" || live.text == "missing_api_key"),
-        ("live refused: " + live.text).c_str());
+    bool ok = Expect(!live.ok && live.text == "missing_api_key", ("live refused: " + live.text).c_str());
     ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "mode still off") && ok;
     const VerbReply observe = Verb("ai.freeplay.observe", kSquadObservation);
     return Expect(!observe.ok && observe.text == "mode_off", "observe refused in mode off") && ok;
+}
+
+// Refusal order: provider_disabled, missing_api_key, missing_model, transport_unavailable. No test
+// here observes, so no provider queue is created and nothing is sent anywhere.
+bool TestLiveModeRefusalOrder()
+{
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    SetEnvironment("XRAY_AGENT_PROVIDER", "off");
+    SetEnvironment("XRAY_AGENT_API_KEY", "not-a-real-key");
+    SetEnvironment("XRAY_AGENT_MODEL", "test-model");
+    const VerbReply disabled = Verb("ai.freeplay.mode", "live");
+    bool ok = Expect(!disabled.ok && disabled.text == "provider_disabled", ("disabled: " + disabled.text).c_str());
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
+    const VerbReply noKey = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!noKey.ok && noKey.text == "missing_api_key", ("no key: " + noKey.text).c_str()) && ok;
+    SetEnvironment("XRAY_AGENT_API_KEY", "not-a-real-key");
+    const VerbReply noModel = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!noModel.ok && noModel.text == "missing_model", ("no model: " + noModel.text).c_str()) && ok;
+    ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "mode still off without a model") && ok;
+    SetEnvironment("XRAY_AGENT_MODEL", "test-model");
+    const VerbReply withModel = Verb("ai.freeplay.mode", "live");
+    ok = Expect(withModel.ok ? withModel.text == "mode=live" : withModel.text == "transport_unavailable",
+        ("with a model only the transport can refuse: " + withModel.text).c_str()) && ok;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    StartLive({});   // an installed test provider needs no environment
+    return Expect(RequireVerb("ai.freeplay.mode") == "mode=live", "test provider satisfies live mode") && ok;
 }
 
 bool TestBlockedEventRewakesOwner()
@@ -1359,10 +1567,15 @@ int main()
     ok = TestLiveDecisionFlow() && ok;
     ok = TestReplyAfterBeginWorldIsStale() && ok;
     ok = TestStaleReplyAfterSplit() && ok;
-    ok = TestProviderErrorHolds() && ok;
+    ok = TestFailedProviderResultIsMalformed() && ok;
+    ok = TestMalformedReplyDoesNotBackOff() && ok;
+    ok = TestFailedReplyAfterBeginIsStale() && ok;
+    ok = TestIdenticalRecordedDecisionIsKept() && ok;
+    ok = TestIdenticalLiveDecisionIsKeptWithMemories() && ok;
     ok = TestProviderCoastHoldsAndBacksOff() && ok;
     ok = TestModelCoastIsKept() && ok;
     ok = TestLiveModeRefusedWithoutProvider() && ok;
+    ok = TestLiveModeRefusalOrder() && ok;
     ok = TestBlockedEventRewakesOwner() && ok;
     ok = TestBlockedObjectiveRevertsToPrevious() && ok;
     ok = TestBlockedOtherSiteKeepsObjective() && ok;

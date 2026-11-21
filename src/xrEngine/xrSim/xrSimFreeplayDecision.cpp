@@ -225,6 +225,12 @@ ActorWakeContext BuildFreeplayWake(const FreeplayOwner& owner, const FreeplayObs
     for (const std::string& memory : owner.memories)
         out += "memory " + memory + "\n";
     out += "wake_reasons " + (wakeReasons.empty() ? std::string("-") : wakeReasons) + "\n";
+    // Field names and units of the site and sighting lines that follow. A site's distance is the game-graph
+    // distance stock ranks simulation targets by (comparable across levels), not metres.
+    out += "site_fields name graph_distance kind occupants\n";
+    out += "site_graph_distance game_graph_distance_stock_ranks_targets_by_not_metres\n";
+    out += "sighting_fields name species faction count distance_m relation\n";
+    out += "sighting_distance_m metres\n";
     out += seen;
     out += "rules\n";
     out += "return xrsim_actor_intent_v1\n";
