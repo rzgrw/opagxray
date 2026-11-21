@@ -96,10 +96,13 @@ class FakeBridge:
 class MoveWorld:
     """A fake game for `move`: owner 7 (group 507) gains sites on a given owners poll; events come after decide."""
 
-    def __init__(self, sites_on_poll=1, event=None, leader_xyz=(10.0, 0.0, 10.0)):
+    def __init__(self, sites_on_poll=1, event=None, leader_xyz=(10.0, 0.0, 10.0), log_failures=0,
+                 decide_reply='accepted move_to esc_smart_terrain_3_16'):
         self.sites_on_poll = sites_on_poll
         self.event = event
         self.leader_xyz = leader_xyz
+        self.log_failures = log_failures      # ledger reads that fail before the decide
+        self.decide_reply = decide_reply
         self.owner_polls = 0          # owners polls after the wake
         self.woken = False
         self.decided = False
@@ -123,8 +126,11 @@ class MoveWorld:
             return True, 'queued'
         if verb == 'ai.freeplay.decide':
             self.decided = True
-            return True, 'accepted move_to esc_smart_terrain_3_16'
+            return True, self.decide_reply
         if verb == 'ai.freeplay.log':
+            if not self.decided and self.log_failures > 0:
+                self.log_failures -= 1
+                return False, 'bridge busy'
             text = ledger_line(4, 7, 'arrived', 'event', 'event', 'esc_smart_terrain_2_12')   # an old arrival
             if self.decided:
                 text += ledger_line(5, 7, 'spawn', 'recorded', 'accepted', 'esc_smart_terrain_3_16', 'move_to')
@@ -246,6 +252,27 @@ class FreeplayProbeTests(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertEqual('arrived', track['outcome'])
         self.assertFalse(track['leader_within_m'])
+
+    def test_move_fails_when_the_baseline_cannot_be_read(self):
+        # The ledger already holds an arrived event for owner 7 (serial 4). Without a baseline it must
+        # not count: the run ends before deciding.
+        code, track, bridge = self.run_move(MoveWorld(event=None, log_failures=1000))
+        self.assertEqual(1, code)
+        self.assertEqual('baseline_failed', track['outcome'])
+        self.assertEqual(0, bridge.count('ai.freeplay.decide'))
+        self.assertEqual(probe.BASELINE_ATTEMPTS, bridge.count('ai.freeplay.log'))
+
+    def test_move_retries_the_baseline_read(self):
+        code, track, bridge = self.run_move(MoveWorld(event='arrived', log_failures=probe.BASELINE_ATTEMPTS - 1))
+        self.assertEqual(0, code)
+        self.assertEqual(4, track['decide']['after_serial'])
+        self.assertEqual(7, track['event']['serial'])      # the old arrival (serial 4) did not count
+
+    def test_move_stops_on_a_kept_decision(self):
+        code, track, bridge = self.run_move(MoveWorld(event='arrived', decide_reply='kept move_to esc_smart_terrain_3_16'))
+        self.assertEqual(1, code)
+        self.assertEqual('kept', track['outcome'])
+        self.assertEqual(0, bridge.count('lua'))
 
     def run_watch(self, world, minutes=1):
         bridge = FakeBridge(world)
@@ -382,6 +409,34 @@ class FreeplayProbeTests(unittest.TestCase):
         self.assertEqual(1, summary['kinds']['pack']['kept_live'])
         self.assertEqual({'constrained': 1}, summary['kinds']['pack']['rejections'])
         self.assertEqual(1, summary['kinds']['squad']['accepted_live'])
+
+    def proven_kinds(self, lines):
+        code, summary, _, _ = self.run_watch(WatchWorld(WATCH_OWNERS, [lines]))
+        return summary['kinds']['squad']['owners_proven'], summary['kinds']['squad']['arrivals']
+
+    def test_watch_proof_needs_a_move_arrival_at_the_decided_site(self):
+        # A stay followed by an arrival proves nothing.
+        proven, arrivals = self.proven_kinds([ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_a', 'stay'),
+                                              ledger_line(2, 3, 'arrived', 'event', 'event', 'esc_a')])
+        self.assertEqual(([], 1), (proven, arrivals))
+        # An arrival at another site (e.g. after a blocked revert) proves nothing.
+        self.out = Path(self.temp.name) / 'other_site'
+        proven, _ = self.proven_kinds([ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_b', 'move_to'),
+                                       ledger_line(2, 3, 'blocked', 'event', 'event', 'esc_b'),
+                                       ledger_line(3, 3, 'arrived', 'event', 'event', 'esc_a')])
+        self.assertEqual([], proven)
+        # A newer accepted live decision between the decision and the arrival: the arrival belongs to neither.
+        self.out = Path(self.temp.name) / 'newer'
+        proven, _ = self.proven_kinds([ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_a', 'move_to'),
+                                       ledger_line(2, 3, 'sighting', 'live', 'accepted', 'esc_b', 'retreat'),
+                                       ledger_line(3, 3, 'arrived', 'event', 'event', 'esc_a')])
+        self.assertEqual([], proven)
+        # The matching case: a retreat to esc_b, then the arrival at esc_b.
+        self.out = Path(self.temp.name) / 'match'
+        proven, _ = self.proven_kinds([ledger_line(1, 3, 'spawn', 'live', 'accepted', 'esc_a', 'move_to'),
+                                       ledger_line(2, 3, 'sighting', 'live', 'accepted', 'esc_b', 'retreat'),
+                                       ledger_line(3, 3, 'arrived', 'event', 'event', 'esc_b')])
+        self.assertEqual([3], proven)
 
 
 if __name__ == '__main__':

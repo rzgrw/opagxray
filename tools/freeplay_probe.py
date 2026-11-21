@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeplay population probe: census and one recorded move, over the agent bridge.
+"""Freeplay population probe over the agent bridge: census, one recorded move, and a ledger watch.
 
   freeplay_probe.py census <endpoint> [--level <level>] --out <dir>
   freeplay_probe.py move <endpoint> --owner <owner_id> --site <smart> --out <dir> [--timeout 900]
@@ -8,10 +8,13 @@ census writes census.txt, owners.txt and census.json, prints the summary and the
 kind and per writer, and exits 1 when the census is empty or an npc line has no owner.
 
 move sends `ai.freeplay.wake <owner> probe`, waits until `ai.freeplay.owners` shows the owner idle
-with a stored observation (non-empty sites=), sends `ai.freeplay.decide <owner> move_to <site>`,
-then every 5 s records the server position of each squad member (lua, alife_object(id).position)
-and reads the ledger, until an `arrived` or `blocked` event for that owner or the timeout. It writes
-track.json and exits 0 only on `arrived` with the leader within 150 m of the smart.
+with a stored observation (non-empty sites=), reads the ledger's highest serial as the baseline (retried; if it
+cannot be read the run ends `baseline_failed` before deciding, so no older event can count), sends
+`ai.freeplay.decide <owner> move_to <site>` (a `kept` reply means the owner already had that objective: no new
+revision and no arrival to wait for, outcome `kept`), then every 5 s records the server position of each squad
+member (lua, alife_object(id).position) and reads the ledger, until an `arrived` or `blocked` event for that
+owner with a serial above the baseline, or the timeout. It writes track.json and exits 0 only on `arrived` with
+the leader within 150 m of the smart.
 
   freeplay_probe.py watch <endpoint> --minutes <n> --out <dir>
 
@@ -23,8 +26,11 @@ per kind from the last snapshot and, per owner kind (joined from the snapshots b
 rejected (by verdict) live decisions, recorded decisions, holds by reason, arrivals, blocked, casualties,
 observation timeouts (verdict=observation_timeout), median/max latencyMs separately over live lines
 (latencyMs_live, model replies) and hold lines (latencyMs_hold, time to provider failure), and median/max
-queueAgeMs over live and hold lines together. An owner is proven when
-an `arrived` event for it has a higher serial than its first accepted `source=live` line. watch exits 0 only if
+queueAgeMs over live and hold lines together. An owner is proven by an `arrived` event whose
+site equals the site of that owner's latest accepted `source=live` decision before it, when that decision's verb
+is `move_to` or `retreat`: the event has the higher serial and no newer accepted live decision for the owner
+lies between the two. An arrival after a `stay`, at another site, or before any accepted live decision proves
+nothing (the adapter reports arrived only for a revision the squad was not already at). watch exits 0 only if
 there are transferable owners and every kind among them has a proven owner. If the bridge connection is lost
 (the game exited), it stops polling, still writes summary.json with `bridge_lost`, and exits 1.
 """
@@ -231,10 +237,18 @@ def leader_distance(sample):
     return math.dist(pos, smart)
 
 
-def max_serial(bridge):
-    ok, text = bridge.request('ai.freeplay.log', '512')
-    entries = parse_log(text) if ok else []
-    return max((e['serial'] for e in entries), default=0)
+BASELINE_ATTEMPTS = 3
+
+
+def max_serial(bridge, sleep=time.sleep, attempts=BASELINE_ATTEMPTS):
+    """Highest ledger serial (0 for an empty ledger), or None when the ledger could not be read."""
+    for attempt in range(attempts):
+        if attempt:
+            sleep(POLL_S)
+        ok, text = bridge.request('ai.freeplay.log', '512')
+        if ok:
+            return max((e['serial'] for e in parse_log(text)), default=0)
+    return None
 
 
 def find_owner(bridge, owner_id):
@@ -300,11 +314,16 @@ def move(bridge, owner_id, site, out, timeout=900.0, sleep=time.sleep, clock=tim
     track['sites_offered'] = owner['sites']
     track['owner_at_decide'] = owner
 
-    baseline = max_serial(bridge)
+    baseline = max_serial(bridge, sleep=sleep)
+    if baseline is None:
+        # Without a baseline an older arrived event for this owner could pass for this move's.
+        return finish('baseline_failed', 1)
     ok, text = bridge.request('ai.freeplay.decide', f'{owner_id} move_to {site}')
     track['decide'] = {'ok': ok, 'reply': text, 't': round(clock() - start, 1), 'after_serial': baseline}
     if not ok:
         return finish(f'rejected:{text}', 1)
+    if text.startswith('kept'):
+        return finish('kept', 1)
     decided_at = clock()
 
     while True:
@@ -356,7 +375,7 @@ def summarise_watch(entries, kind_of, transferable_by_kind):
                                        'observation_timeouts': 0, 'owners_proven': [],
                                        'latency_live': [], 'latency_hold': [], 'queue': []})
 
-    accepted_at = {}        # owner -> serial of its first accepted live decision
+    decided = {}            # owner -> its latest accepted live decision (serial order)
     proven = set()
     for e in sorted(entries, key=lambda e: e['serial']):
         owner = e.get('ownerId')
@@ -371,7 +390,7 @@ def summarise_watch(entries, kind_of, transferable_by_kind):
         if source == 'live':
             if verdict == 'accepted':
                 b['accepted_live'] += 1
-                accepted_at.setdefault(owner, e['serial'])
+                decided[owner] = e
             elif verdict == 'kept':
                 b['kept_live'] += 1
             else:
@@ -383,7 +402,9 @@ def summarise_watch(entries, kind_of, transferable_by_kind):
         elif source == 'event':
             if reason == 'arrived':
                 b['arrivals'] += 1
-                if owner in accepted_at and e['serial'] > accepted_at[owner] and owner not in proven:
+                decision = decided.get(owner)
+                if decision is not None and decision.get('verb') in ('move_to', 'retreat') and \
+                        decision.get('site') == e.get('site') and owner not in proven:
                     proven.add(owner)
                     b['owners_proven'].append(owner)
             elif reason == 'blocked':
