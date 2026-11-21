@@ -24,8 +24,12 @@ void CSoundManager::CreateDevicesList()
 {
     ZoneScoped;
 
-    // -agent_background instances are muted: never open an audio device.
-    static bool noSound = HasStartupParam("-nosound") || HasStartupParam("-agent_background");
+    // -agent_background instances are muted: never open an audio device, unless -agent_sound
+    // asks for one. With no device, sounds are silent and zero-length, which makes some CoC
+    // scripts (camp storytellers) cycle sound themes fast enough to hit their own bugs; long
+    // unattended runs pass -agent_sound and keep their volumes at 0 in user.ltx instead.
+    static bool noSound = HasStartupParam("-nosound") ||
+        (HasStartupParam("-agent_background") && !HasStartupParam("-agent_sound"));
 
     SoundRender = xr_new<CSoundRender_CoreA>(*this);
 
