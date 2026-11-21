@@ -12,8 +12,11 @@ wraps simulation_board:get_squad_target (sim_board.script), which stock generic_
 (sim_squad_scripted.script) calls when a squad needs a new target. For a squad it holds (writer
 "sim", enrolled, with an objective) the wrapper returns the objective's smart, provided the
 smart passes stock's own keep-target check; every other call goes to the stock function
-unchanged. A held squad with no feasible smart gets nil: one blocked event per objective revision,
-and stock's no-target path then locks it in place until a new revision. The adapter never sets
+unchanged. When the objective's smart is missing or refused, the wrapper reports blocked and falls
+back to the squad's assigned smart; when the smart it would answer fails stock's keep-target check,
+it reports blocked and answers nil (blocked events: at most one per objective revision). A hold, or
+a fallback, with no assigned smart gets nil with no event. After a nil answer stock's no-target path
+locks the squad in place until a new revision. The adapter never sets
 scripted_target, so stock population counts, tasks and reach rules see these squads as ordinary
 simulation squads. Squad state it writes: a one-time reset (current_action, __lock) when a new
 objective revision arrives, so that stock asks for a target at the squad's next update even
@@ -25,7 +28,10 @@ Companions, hostages, scripted and random-target squads are reported and left al
 
 local TICK_MS = 1000
 local SYNC_MS = 5000
-local LONE_SCAN_MS = 60000
+local LONE_SCAN_MS = 60000         -- a squadless scan pass starts this often
+local SCAN_IDS_PER_TICK = 2048     -- ids per tick: a pass over 65534 ids takes 32 ticks, well within LONE_SCAN_MS
+local FORCED_SYNC_GAP_MS = 2000    -- a death-forced sync runs no sooner than this after the previous sync
+local REFUSAL_LOG_MS = 60000       -- a refused sync is logged at most once per this interval after the first
 local MAX_SITES = 8
 local MAX_SIGHTINGS = 6
 local SIGHT_RADIUS_M = 150
@@ -44,11 +50,17 @@ local registered = {}      -- [callback name] = registered function
 local next_tick = 0
 local next_sync = 0
 local next_scan = 0
+local last_sync = 0
 local force_sync = false
 local first_sync_done = false
+local scan_cursor          -- next id of the squadless scan pass in progress, nil between passes
+local scan_found = {}      -- ids found so far by the pass in progress
+local refusals = 0         -- refused syncs since the last refusal line
+local refusal_logged_at    -- time of the last refusal line
 
-local lone_cache = {}      -- list of object ids found by the last squadless scan
-local objectives = {}      -- [group id] = {rev, verb, site, blocked_rev, arrived_rev, reset_rev}
+local lone_cache = {}      -- list of object ids found by the last complete squadless scan
+local objectives = {}      -- [group id] = {owner, rev, verb, site, no_arrival, blocked_rev, arrived_rev, reset_rev}
+local script_picks = {}    -- [group id] = {at, script}: the squad's condlist pick at time_global() `at`
 local enrolled = {}        -- [group id] = writer reported in the last sync
 local board_class          -- sim_board.simulation_board while the wrapper is installed
 local stock_target_fn      -- the stock simulation_board.get_squad_target
@@ -148,6 +160,31 @@ local function precondition(smart, squad)
 	return ok and result == true
 end
 
+-- False only when stock se_smart_terrain:target_precondition(squad) (smart_terrain.script) is false
+-- for certain, checked without calling it: a disabled smart (stock disables a smart it cannot use and
+-- drops it from simulation), respawn_only_smart, a full smart (population >= max_population), a smart
+-- with no props, or props that name the squad's faction with a non-positive weight while props.all is
+-- not positive. Anything it cannot decide (an odd value type) is left to the precondition itself, so a
+-- site list filtered with it equals the list the precondition alone gives.
+local function may_accept(smart, entry, squad)
+	if smart.disabled or smart.respawn_only_smart == true then
+		return false
+	end
+	local population, max_population = entry.population, smart.max_population
+	if type(population) == "number" and type(max_population) == "number" and population >= max_population then
+		return false
+	end
+	local props = smart.props
+	if not props then
+		return false
+	end
+	local own, all = props[squad.player_id], props.all
+	if type(own) == "number" and type(all) == "number" and own <= 0 and all <= 0 then
+		return false
+	end
+	return true
+end
+
 local function site_kind(smart)
 	local props = smart.props
 	if props then
@@ -186,7 +223,27 @@ end
 -- writers
 ------------------------------------------------------------------------------------------------
 
-local function writer_of(squad)
+-- True when the squad's own condlist picks a scripted target. Stock evaluates that condlist at every
+-- update of the squad (sim_squad_scripted:get_script_target); the adapter reuses its own pick when it
+-- is at most max_age_ms old (0: made in this same frame) instead of evaluating the condlist again.
+local function condlist_scripted(squad, max_age_ms)
+	local now = time_global()
+	local cached = script_picks[squad.id]
+	if cached and cached.at <= now and now - cached.at <= max_age_ms then
+		return cached.script
+	end
+	local section = xr_logic.pick_section_from_condlist(db.actor, squad, squad.action_condlist)
+	local script = section ~= nil and section ~= "" and section ~= "nil"
+	if cached then
+		cached.at, cached.script = now, script
+	else
+		script_picks[squad.id] = {at = now, script = script}
+	end
+	return script
+end
+
+-- max_age_ms: how old a condlist pick may be reused (see condlist_scripted); 0 when omitted.
+local function writer_of(squad, max_age_ms)
 	local id = squad.id
 	if axr_companions.companion_squads[id] then
 		return "companion"
@@ -198,11 +255,8 @@ local function writer_of(squad)
 	if squad.scripted_target ~= nil then
 		return "script"
 	end
-	if squad.action_condlist then
-		local section = xr_logic.pick_section_from_condlist(db.actor, squad, squad.action_condlist)
-		if section and section ~= "" and section ~= "nil" then
-			return "script"
-		end
+	if squad.action_condlist and condlist_scripted(squad, max_age_ms or 0) then
+		return "script"
 	end
 	if squad.random_targets then
 		return "random"
@@ -220,6 +274,12 @@ end
 
 local function is_hold(objective)
 	return objective.verb == "hold" or objective.site == "-"
+end
+
+-- True when stock has the squad staying at the named smart (current_action 1 is stock's stay action).
+local function stays_at(squad, site)
+	local smart = SIMBOARD.smarts_by_names[site]
+	return smart ~= nil and squad.current_action == 1 and squad.current_target_id == smart.id
 end
 
 -- Stock's own test for keeping a target (generic_update re-validates the assigned target with it):
@@ -275,17 +335,47 @@ end
 -- population sync
 ------------------------------------------------------------------------------------------------
 
-local function scan_lone(now)
-	next_scan = now + LONE_SCAN_MS
-	local found = {}
+-- Squadless stalkers and mutants: server object ids from..to that are alive and have no squad.
+local function scan_ids(from, to, found)
 	local sim = alife()
-	for id = 1, NO_GROUP - 1 do
+	for id = from, to do
 		local se_obj = sim:object(id)
 		if se_obj and se_obj.group_id == NO_GROUP and species_of_clsid(se_obj:clsid()) and se_obj:alive() then
 			found[#found + 1] = id
 		end
 	end
+end
+
+-- One whole pass at once: used only at activation, so the first sync's census is complete.
+local function scan_lone_full(now)
+	local found = {}
+	scan_ids(1, NO_GROUP - 1, found)
 	lone_cache = found
+	scan_cursor = nil
+	scan_found = {}
+	next_scan = now + LONE_SCAN_MS
+end
+
+-- The periodic pass, spread over ticks: a pass starts every LONE_SCAN_MS and looks at
+-- SCAN_IDS_PER_TICK ids per tick; lone_cache keeps the last complete pass until the next one ends.
+local function scan_lone_step(now)
+	if scan_cursor == nil then
+		if now < next_scan then
+			return
+		end
+		scan_cursor = 1
+		scan_found = {}
+		next_scan = now + LONE_SCAN_MS
+	end
+	local last = math.min(scan_cursor + SCAN_IDS_PER_TICK - 1, NO_GROUP - 1)
+	scan_ids(scan_cursor, last, scan_found)
+	if last >= NO_GROUP - 1 then
+		lone_cache = scan_found
+		scan_found = {}
+		scan_cursor = nil
+	else
+		scan_cursor = last + 1
+	end
 end
 
 -- Squad description used by sync and observations. nil for a squad that is not reported.
@@ -392,12 +482,27 @@ local function update_sightings(groups, now)
 	end
 end
 
+-- A refused sync changes nothing in the engine (a snapshot is taken whole or not at all). The first
+-- refusal is logged with its reason, then at most one line per REFUSAL_LOG_MS with the count since the
+-- last line, so a refusal that persists stays visible.
+local function note_refused_sync(now, reason)
+	refusals = refusals + 1
+	if refusal_logged_at ~= nil and now - refusal_logged_at < REFUSAL_LOG_MS then
+		return
+	end
+	if refusal_logged_at == nil then
+		emit("~ xrsim_freeplay: sync refused: " .. reason)
+	else
+		emit(string.format("~ xrsim_freeplay: sync refused: %s (%d refusals since the last line)", reason, refusals))
+	end
+	refusal_logged_at = now
+	refusals = 0
+end
+
 local function sync(now)
 	next_sync = now + SYNC_MS
+	last_sync = now
 	force_sync = false
-	if now >= next_scan then
-		scan_lone(now)
-	end
 
 	local lines = {"xrsim_freeplay_sync_v1"}
 	local groups = {}
@@ -406,7 +511,7 @@ local function sync(now)
 	for id, squad in pairs(SIMBOARD.squads) do
 		local group = describe(squad)
 		if group then
-			local writer = writer_of(squad)
+			local writer = writer_of(squad, SYNC_MS)
 			now_enrolled[id] = writer
 			groups[#groups + 1] = group
 			lines[#lines + 1] = string.format("group %d %s %s %s %s %s %s %s %d", id, squad:name(), group.species,
@@ -424,6 +529,11 @@ local function sync(now)
 		if now_enrolled[id] == nil then
 			objectives[id] = nil
 			held_locks[id] = nil
+		end
+	end
+	for id in pairs(script_picks) do
+		if now_enrolled[id] == nil then
+			script_picks[id] = nil
 		end
 	end
 	enrolled = now_enrolled
@@ -447,7 +557,7 @@ local function sync(now)
 
 	local ok, text = call("ai.freeplay.sync", table.concat(lines, "\n"))
 	if not ok then
-		warn_once("sync:" .. text, "sync refused: " .. text)
+		note_refused_sync(now, text)
 		return
 	end
 	if not first_sync_done then
@@ -475,7 +585,8 @@ local function observe(owner_id, group_id, membership_revision)
 	local current = squad.smart_id and SIMBOARD.smarts[squad.smart_id]
 	for smart_id, entry in pairs(SIMBOARD.smarts) do
 		local smart = entry.smrt
-		if smart and smart_id ~= squad.smart_id and smart.locked ~= true and precondition(smart, squad) then
+		if smart and smart_id ~= squad.smart_id and smart.locked ~= true and may_accept(smart, entry, squad) and
+			precondition(smart, squad) then
 			sites[#sites + 1] = {smart = smart, distance = simulation_objects.sim_dist_to(smart, squad)}
 		end
 	end
@@ -540,12 +651,20 @@ local function tick(now)
 				observe(owner_id, tonumber(binding_id), revision)
 			end
 		else
-			local group_id, rev, verb, site = string.match(line, "^apply %d+ (%d+) (%d+) (%S+) (%S+) %S+$")
-			if group_id then
+			local owner, group_id, rev, verb, site = string.match(line, "^apply (%d+) (%d+) (%d+) (%S+) (%S+) %S+$")
+			if owner then
 				local id, revision = tonumber(group_id), tonumber(rev)
 				local known = objectives[id]
-				if not (known and known.rev == revision) then
-					objectives[id] = {rev = revision, verb = verb, site = site}
+				-- Keyed on owner and revision: a group id reused by a new owner replaces the objective
+				-- even at an equal revision, with fresh once-per-revision state.
+				if not (known and known.owner == owner and known.rev == revision) then
+					local objective = {owner = owner, rev = revision, verb = verb, site = site}
+					-- arrived is reported only for a squad that travels under this revision: never for a
+					-- stay or a hold, nor when the squad already stays at the site.
+					local squad = SIMBOARD.squads[id]
+					objective.no_arrival = verb == "stay" or is_hold(objective) or
+						(squad ~= nil and stays_at(squad, site))
+					objectives[id] = objective
 				end
 			else
 				warn_once("line:" .. line, "unknown tick line: " .. line)
@@ -665,7 +784,8 @@ local function on_actor_update()
 			return
 		end
 	end
-	if force_sync or now >= next_sync then
+	scan_lone_step(now)
+	if now >= next_sync or (force_sync and now - last_sync >= FORCED_SYNC_GAP_MS) then
 		sync(now)
 	end
 	tick(now)
@@ -701,7 +821,7 @@ local function on_first_update()
 	log_info(text .. " " .. epoch)
 	active = true
 	local now = time_global()
-	scan_lone(now)
+	scan_lone_full(now)
 	sync(now)
 	next_tick = now + TICK_MS
 	return true
@@ -738,12 +858,9 @@ local function on_squad_update(squad)
 		end
 	end
 
-	if not is_hold(objective) and objective.arrived_rev ~= objective.rev and squad.current_action == 1 then
-		local smart = SIMBOARD.smarts_by_names[objective.site]
-		if smart and squad.current_target_id == smart.id then
-			objective.arrived_rev = objective.rev
-			call("ai.freeplay.event", id .. " arrived " .. objective.site)
-		end
+	if not objective.no_arrival and objective.arrived_rev ~= objective.rev and stays_at(squad, objective.site) then
+		objective.arrived_rev = objective.rev
+		call("ai.freeplay.event", id .. " arrived " .. objective.site)
 	end
 end
 
@@ -754,6 +871,7 @@ local function on_squad_unregister(squad)
 	held_locks[id] = nil
 	enrolled[id] = nil
 	sight_pairs[id] = nil
+	script_picks[id] = nil
 end
 
 local function on_squad_npc_death(squad, npc)
@@ -761,6 +879,7 @@ local function on_squad_npc_death(squad, npc)
 	if enrolled[squad.id] and npc_id then
 		call("ai.freeplay.event", squad.id .. " casualty " .. npc_id)
 	end
+	-- Membership changed: sync soon, but deaths in a fight share one sync (see on_actor_update).
 	force_sync = true
 end
 
