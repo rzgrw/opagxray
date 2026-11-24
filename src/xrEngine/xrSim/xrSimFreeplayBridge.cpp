@@ -58,6 +58,14 @@ struct LiveSettings
 };
 
 constexpr uint64_t kCallWindowMs = 60000;
+constexpr uint64_t kBlockedMemoryMs = 600000;
+
+// The site an owner's last blocked event named. While remembered, a decision for that site is rejected.
+struct BlockedSite
+{
+    std::string site;
+    uint64_t atMs = 0;
+};
 
 struct FreeplayRuntime
 {
@@ -74,6 +82,7 @@ struct FreeplayRuntime
     std::map<uint64_t, uint32_t> appliedRevision; // objective revision of the last apply line per owner
     std::map<uint64_t, FreeplayObjective> previousObjective; // in force before the owner's last committed decision
     LiveSettings live;
+    std::map<uint64_t, BlockedSite> blocked;      // until kBlockedMemoryMs, an arrived event, retire or begin
     std::deque<uint64_t> submissions;             // tick time of each live provider submission in the call window
 };
 
@@ -330,6 +339,20 @@ FreeplayLedgerEntry DecisionEntry(uint64_t ownerId, const StoredObservation& sto
     return entry;
 }
 
+// The owner's remembered blocked site, or nullptr once forgotten or expired.
+const BlockedSite* ActiveBlockedSite(uint64_t ownerId)
+{
+    const auto found = g_freeplay.blocked.find(ownerId);
+    if (found == g_freeplay.blocked.end())
+        return nullptr;
+    if (Elapsed(found->second.atMs, g_freeplay.nowMs) >= kBlockedMemoryMs)
+    {
+        g_freeplay.blocked.erase(found);
+        return nullptr;
+    }
+    return &found->second;
+}
+
 void StoreMemories(uint64_t ownerId, const FreeplayVerdict& verdict)
 {
     // Memories are single tokens from the intent parser; AddMemory drops anything else.
@@ -339,13 +362,18 @@ void StoreMemories(uint64_t ownerId, const FreeplayVerdict& verdict)
 
 // Commits a verdict and returns the ledger verdict: accepted, kept, or why nothing changed. A verdict
 // equal to the owner's current objective (same verb and site) is kept: no new revision, so the adapter
-// sees no new objective, and memories are still stored.
+// sees no new objective, and memories are still stored. A verdict for the owner's recently blocked site is
+// recently_blocked: stock has just refused that site, so choosing it again would only restart the
+// stay/move -> blocked -> revert -> wake loop.
 std::string ApplyVerdict(uint64_t ownerId, const FreeplayVerdict& verdict, FreeplayObjectiveSource source)
 {
     if (!verdict.ok)
         return verdict.reason;
     if (verdict.keep)
         return "kept";
+    const BlockedSite* blocked = ActiveBlockedSite(ownerId);
+    if (blocked != nullptr && blocked->site == verdict.site)
+        return "recently_blocked";
     const FreeplayOwner* owner = g_freeplay.population.FindOwner(ownerId);
     const FreeplayObjective previous = owner != nullptr ? owner->objective : FreeplayObjective();
     if (owner != nullptr && previous.verb == verdict.verb && previous.site == verdict.site)
@@ -454,6 +482,7 @@ void ForgetRetiredOwners()
     EraseRetired(g_freeplay.observations);
     EraseRetired(g_freeplay.appliedRevision);
     EraseRetired(g_freeplay.previousObjective);
+    EraseRetired(g_freeplay.blocked);
     for (auto it = g_freeplay.knownOwners.begin(); it != g_freeplay.knownOwners.end();)
     {
         if (g_freeplay.population.FindOwner(*it) == nullptr)
@@ -516,6 +545,7 @@ std::string Begin(const std::string& payload, bool& ok)
     g_freeplay.knownOwners.clear();
     g_freeplay.appliedRevision.clear();
     g_freeplay.previousObjective.clear();
+    g_freeplay.blocked.clear();
     return Succeed(ok, "epoch=" + std::to_string(epoch));
 }
 
@@ -545,6 +575,7 @@ std::string Retire(const std::string& payload, bool& ok)
     g_freeplay.observations.erase(ownerId);
     g_freeplay.appliedRevision.erase(ownerId);
     g_freeplay.previousObjective.erase(ownerId);
+    g_freeplay.blocked.erase(ownerId);
     g_freeplay.knownOwners.erase(ownerId);
     for (auto it = g_freeplay.pending.begin(); it != g_freeplay.pending.end();)
     {
@@ -586,7 +617,13 @@ std::string Event(const std::string& payload, bool& ok)
     const FreeplayOwner* owner = g_freeplay.population.FindByBinding(FreeplayBinding::Group, groupId);
     if (owner == nullptr)
         return Fail(ok, "unknown_group");
-    g_freeplay.scheduler.RequestWake(owner->ownerId, tokens[1], g_freeplay.nowMs);
+    const uint64_t ownerId = owner->ownerId;
+    const bool blocked = tokens[1] == "blocked";
+    // A repeated report of the site already remembered as blocked wakes nobody, so it cannot restart the loop.
+    const BlockedSite* remembered = blocked ? ActiveBlockedSite(ownerId) : nullptr;
+    const bool repeated = remembered != nullptr && remembered->site == tokens[2];
+    if (!repeated)
+        g_freeplay.scheduler.RequestWake(ownerId, tokens[1], g_freeplay.nowMs);
     // Sightings are frequent; they show up only as the wakeReason of the owner's next decision.
     if (tokens[1] == "sighting")
         return Succeed(ok, "queued");
@@ -600,8 +637,14 @@ std::string Event(const std::string& payload, bool& ok)
     entry.verdict = "event";
     entry.site = tokens[2];
     g_freeplay.ledger.Append(entry);
-    if (tokens[1] == "blocked")
-        RevertBlockedObjective(owner->ownerId, tokens[2]);
+    if (blocked)
+    {
+        if (!repeated)
+            g_freeplay.blocked[ownerId] = BlockedSite{tokens[2], g_freeplay.nowMs};
+        RevertBlockedObjective(ownerId, tokens[2]);
+    }
+    else if (tokens[1] == "arrived")
+        g_freeplay.blocked.erase(ownerId);
     return Succeed(ok, "queued");
 }
 
@@ -649,7 +692,9 @@ std::string Observe(const std::string& payload, bool& ok)
     }
 
     const FreeplayOwner* owner = g_freeplay.population.FindOwner(ownerId);
-    const ActorWakeContext context = BuildFreeplayWake(*owner, stored.observation, stored.reasons);
+    const BlockedSite* blocked = ActiveBlockedSite(ownerId);
+    const ActorWakeContext context =
+        BuildFreeplayWake(*owner, stored.observation, stored.reasons, blocked != nullptr ? blocked->site : std::string());
     const ActorWakeSubmitResult submitted = EnsureFreeplayQueue().Submit(context);
     if (!submitted.ok)
     {

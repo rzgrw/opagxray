@@ -1853,6 +1853,126 @@ bool TestCallsPerMinuteCap()
     return ok;
 }
 
+// --- blocked-site memory ---
+
+size_t CountOf(const std::string& text, const std::string& part)
+{
+    size_t count = 0;
+    for (size_t at = text.find(part); at != std::string::npos; at = text.find(part, at + 1))
+        ++count;
+    return count;
+}
+
+bool TestRecentlyBlockedSiteIsRejected()
+{
+    DecideMoveToC();
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_c");
+    bool ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 "),
+        ("blocked objective reverted: " + OwnerLine(1)).c_str());
+    const VerbReply again = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    ok = Expect(!again.ok && again.text == "recently_blocked", ("blocked site rejected: " + again.text).c_str()) && ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 "),
+        ("rejection keeps objective and revision: " + OwnerLine(1)).c_str()) && ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.log"), "source=recorded verdict=recently_blocked verb=move_to "
+                                                         "site=esc_smart_c "),
+        "rejection is logged") && ok;
+    ok = Expect(!Contains(RequireVerb("ai.freeplay.tick", "2"), "apply 1 500 4"), "rejection applies nothing") && ok;
+    const VerbReply retreat = Verb("ai.freeplay.decide", "1 retreat esc_smart_c");
+    ok = Expect(!retreat.ok && retreat.text == "recently_blocked", "retreat to the blocked site rejected too") && ok;
+    const VerbReply other = Verb("ai.freeplay.decide", "1 move_to esc_smart_a");
+    ok = Expect(other.ok && other.text == "accepted move_to esc_smart_a", ("other site accepted: " + other.text).c_str()) &&
+        ok;
+    return Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_a source=recorded rev=4 "),
+               ("other site raises the revision: " + OwnerLine(1)).c_str()) && ok;
+}
+
+bool TestRecentlyBlockedExpiresAndClears()
+{
+    DecideMoveToC();   // ticks 0 and 1
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_c");   // remembered at 1
+    RequireVerb("ai.freeplay.tick", "600000");
+    const VerbReply held = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    bool ok = Expect(!held.ok && held.text == "recently_blocked", ("still blocked 1 ms before expiry: " + held.text).c_str());
+    RequireVerb("ai.freeplay.tick", "600001");
+    const VerbReply expired = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    ok = Expect(expired.ok && expired.text == "accepted move_to esc_smart_c",
+        ("accepted after 600000 ms: " + expired.text).c_str()) && ok;
+
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_c");
+    ok = Expect(Verb("ai.freeplay.decide", "1 move_to esc_smart_c").text == "recently_blocked", "blocked again") && ok;
+    RequireVerb("ai.freeplay.event", "500 arrived esc_smart_b");
+    const VerbReply cleared = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    ok = Expect(cleared.ok && cleared.text == "accepted move_to esc_smart_c",
+        ("an arrival clears the memory: " + cleared.text).c_str()) && ok;
+    return ok;
+}
+
+bool TestBlockedStayLoopIsBroken()
+{
+    const char* stay = "xrsim_actor_intent_v1\naction stay\nend\n";
+    auto prompts = std::make_shared<std::vector<std::string>>();
+    StartLiveWith(std::make_unique<CapturingProvider>(std::vector<std::string>{stay, stay, stay}, prompts), kTwoGroups);
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    bool ok = Expect(Contains(TickUntilLogged("verdict=accepted", 1), "apply 1 500 2 stay esc_smart_a live\n"),
+        "first stay accepted at rev 2");
+
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_a");   // stock refuses the squad's own smart
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 ") &&
+            Contains(OwnerLine(1), "state=queued "),
+        ("blocked stay reverts and wakes: " + OwnerLine(1)).c_str()) && ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.tick", "46000"), "observe 1 group 500 1\n"), "owner 1 woken") && ok;
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    const std::string ticks = TickUntilLogged("verdict=recently_blocked", 46000);
+    ok = Expect(!Contains(ticks, "apply 1 "), ("second stay applies nothing: " + ticks).c_str()) && ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.log"), "source=live verdict=recently_blocked verb=stay site=esc_smart_a "),
+        "second stay is recently_blocked") && ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 ") &&
+            Contains(OwnerLine(1), "state=idle "),
+        ("no new revision, owner idle: " + OwnerLine(1)).c_str()) && ok;
+    ok = Expect(prompts->size() == 2 && !Contains((*prompts)[0], "recently_blocked_site") &&
+            Contains((*prompts)[1], "recently_blocked_site esc_smart_a\n"),
+        "the second prompt names the blocked site") && ok;
+
+    // The adapter reports the same blocked site again: logged, but no wake, so the loop cannot restart.
+    const size_t events = CountOf(RequireVerb("ai.freeplay.log", "100"), "verdict=event");
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_a");
+    ok = Expect(CountOf(RequireVerb("ai.freeplay.log", "100"), "verdict=event") == events + 1,
+        "repeated blocked event still logged") && ok;
+    ok = Expect(Contains(OwnerLine(1), "state=idle "), ("repeated blocked event wakes nobody: " + OwnerLine(1)).c_str()) &&
+        ok;
+    for (const char* now : {"100000", "400000", "645999"})
+        ok = Expect(!Contains(RequireVerb("ai.freeplay.tick", now), "observe 1 "),
+            (std::string("no wake before the reconsider interval at ") + now).c_str()) && ok;
+    ok = Expect(prompts->size() == 2, "no further provider call") && ok;
+    return Expect(Contains(RequireVerb("ai.freeplay.tick", "646000"), "observe 1 group 500 1\n"),
+               "woken again by the reconsider interval") && ok;
+}
+
+bool TestWakePromptNamesBlockedSite()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    const xrSim::FreeplayObservation observation = RequireObservation(population, kSquadObservation);
+    const xrSim::FreeplayOwner& squad = RequireGroup(population, 500);
+    const std::string plain = xrSim::BuildFreeplayWake(squad, observation, "blocked").prompt;
+    const std::string named = xrSim::BuildFreeplayWake(squad, observation, "blocked", "esc_smart_c").prompt;
+    bool ok = Expect(!Contains(plain, "recently_blocked_site") && !Contains(plain, "do_not_choose_recently_blocked_site"),
+        "no blocked lines without a memory");
+    ok = Expect(Contains(named, "\nrecently_blocked_site esc_smart_c\n"), "blocked site line") && ok;
+    const size_t rules = named.find("\nrules\n");
+    const size_t rule = named.find("\ndo_not_choose_recently_blocked_site\n");
+    ok = Expect(rule != std::string::npos && rules != std::string::npos && rule > rules, "rule line among the rules") && ok;
+    std::string stripped = named;
+    for (const char* line : {"recently_blocked_site esc_smart_c\n", "do_not_choose_recently_blocked_site\n"})
+    {
+        const size_t at = stripped.find(line);
+        if (at != std::string::npos)
+            stripped.erase(at, std::string(line).size());
+    }
+    return Expect(stripped == plain, "otherwise the same prompt") && ok;
+}
+
 #if !defined(_WIN32)
 // True when this process has no child left, reaped or not.
 bool NoChildLeft()
@@ -2027,6 +2147,10 @@ int main()
     ok = TestProcessRunnerEchoAndTimeout() && ok;
     ok = TestLiveSettingsFromEnvironment() && ok;
     ok = TestCallsPerMinuteCap() && ok;
+    ok = TestRecentlyBlockedSiteIsRejected() && ok;
+    ok = TestRecentlyBlockedExpiresAndClears() && ok;
+    ok = TestBlockedStayLoopIsBroken() && ok;
+    ok = TestWakePromptNamesBlockedSite() && ok;
     RequireVerb("ai.reset");
     return ok ? 0 : 1;
 }

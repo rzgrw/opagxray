@@ -37,8 +37,9 @@ struct FreeplayLedgerEntry
 };
 
 FreeplayObservationParse ParseFreeplayObservation(const FreeplayPopulation& population, const std::string& text);
+// recentlyBlockedSite: the site the owner's last blocked event named, while the runtime remembers it ("" if none).
 ActorWakeContext BuildFreeplayWake(const FreeplayOwner& owner, const FreeplayObservation& observation,
-    const std::string& wakeReasons);
+    const std::string& wakeReasons, const std::string& recentlyBlockedSite = std::string());
 // Checks a provider plan against the live registry and the observation it answered. Never mutates.
 FreeplayVerdict ValidateFreeplayDecision(const FreeplayPopulation& population,
     const FreeplayObservation& observation, const ActorIntentPlan& plan);
