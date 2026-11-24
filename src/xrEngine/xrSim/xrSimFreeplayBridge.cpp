@@ -9,6 +9,7 @@
 #include "xrSim/xrSimFreeplayScheduler.h"
 
 #include <cstdlib>
+#include <deque>
 #include <map>
 #include <set>
 #include <sstream>
@@ -44,6 +45,20 @@ struct PendingRequest
     StoredObservation stored;
 };
 
+// Read from the environment once, when the mode switches to live.
+struct LiveSettings
+{
+    std::string provider = "anthropic";
+    std::string model = "-";
+    uint64_t maxInFlight = 2;
+    uint64_t callsPerMinute = 0;   // 0: no cap
+    uint64_t reconsiderMs = 600000;
+    uint64_t minWakeMs = 45000;
+    ClaudeCliConfig cli;   // the claude_cli provider's executable, model and timeout
+};
+
+constexpr uint64_t kCallWindowMs = 60000;
+
 struct FreeplayRuntime
 {
     FreeplayMode mode = FreeplayMode::Off;
@@ -58,6 +73,8 @@ struct FreeplayRuntime
     std::set<uint64_t> knownOwners;               // owners that already had their spawn wake
     std::map<uint64_t, uint32_t> appliedRevision; // objective revision of the last apply line per owner
     std::map<uint64_t, FreeplayObjective> previousObjective; // in force before the owner's last committed decision
+    LiveSettings live;
+    std::deque<uint64_t> submissions;             // tick time of each live provider submission in the call window
 };
 
 FreeplayRuntime g_freeplay;
@@ -219,12 +236,78 @@ std::string LiveModeRefusal()
     return std::string();
 }
 
-std::unique_ptr<IActorIntentProvider> CreateFreeplayProvider()
+// One numeric setting: unset keeps the default; anything else must be a number in [minValue, maxValue].
+bool ReadSetting(const char* name, uint64_t minValue, uint64_t maxValue, uint64_t& value)
+{
+    const std::string text = EnvironmentValue(name);
+    if (text.empty())
+        return true;
+    uint64_t parsed = 0;
+    if (!ParseU64(text, ~0ull, parsed) || parsed < minValue || parsed > maxValue)
+        return false;
+    value = parsed;
+    return true;
+}
+
+// Empty when the scheduler settings are usable; they are then in settings.
+std::string LoadLiveSettings(LiveSettings& settings)
 {
     const AgentProviderConfig config = LiveConfig();
-    if (config.enabled && config.provider == "claude_cli")
-        return std::make_unique<ClaudeCliActorIntentProvider>(LoadCliSettings().config, CreateProcessCliRunner());
-    return CreateLiveActorIntentProvider(config);
+    const bool cli = config.provider == "claude_cli";
+    settings = LiveSettings();
+    settings.provider = config.provider;
+    const std::string model = EnvironmentValue("XRAY_AGENT_MODEL");
+    settings.model = model.empty() ? std::string("-") : model;
+    if (cli)
+        settings.cli = LoadCliSettings().config;
+    settings.maxInFlight = cli ? 1 : 2;
+    settings.callsPerMinute = cli ? 6 : 0;
+    if (!ReadSetting("XRAY_FREEPLAY_MAX_IN_FLIGHT", 1, 8, settings.maxInFlight))
+        return "invalid_setting:XRAY_FREEPLAY_MAX_IN_FLIGHT";
+    if (!ReadSetting("XRAY_FREEPLAY_CALLS_PER_MINUTE", 0, 600, settings.callsPerMinute))
+        return "invalid_setting:XRAY_FREEPLAY_CALLS_PER_MINUTE";
+    if (!ReadSetting("XRAY_FREEPLAY_RECONSIDER_MS", 60000, 86400000, settings.reconsiderMs))
+        return "invalid_setting:XRAY_FREEPLAY_RECONSIDER_MS";
+    if (!ReadSetting("XRAY_FREEPLAY_MIN_WAKE_MS", 5000, 3600000, settings.minWakeMs))
+        return "invalid_setting:XRAY_FREEPLAY_MIN_WAKE_MS";
+    return std::string();
+}
+
+FreeplaySchedulerConfig SchedulerConfigFor(const LiveSettings& settings)
+{
+    FreeplaySchedulerConfig config;
+    config.maxInFlight = static_cast<uint32_t>(settings.maxInFlight);
+    config.reconsiderIntervalMs = static_cast<uint32_t>(settings.reconsiderMs);
+    config.minWakeIntervalMs = static_cast<uint32_t>(settings.minWakeMs);
+    return config;
+}
+
+std::string LiveSettingsText(const LiveSettings& settings)
+{
+    return " provider=" + settings.provider + " model=" + settings.model +
+        " max_in_flight=" + std::to_string(settings.maxInFlight) +
+        " calls_per_minute=" + std::to_string(settings.callsPerMinute) +
+        " reconsider_ms=" + std::to_string(settings.reconsiderMs) + " min_wake_ms=" + std::to_string(settings.minWakeMs);
+}
+
+// How many owners the tick may hand out under the call budget: submissions in the last 60 s of tick time
+// and hand-outs still awaiting their observation (each will submit) both count. Recorded mode has no cap.
+size_t CallBudget(uint64_t nowMs)
+{
+    if (g_freeplay.mode != FreeplayMode::Live || g_freeplay.live.callsPerMinute == 0)
+        return SIZE_MAX;
+    std::deque<uint64_t>& submissions = g_freeplay.submissions;
+    while (!submissions.empty() && Elapsed(submissions.front(), nowMs) >= kCallWindowMs)
+        submissions.pop_front();
+    const uint64_t used = submissions.size() + g_freeplay.handedOut.size();
+    return used >= g_freeplay.live.callsPerMinute ? 0 : static_cast<size_t>(g_freeplay.live.callsPerMinute - used);
+}
+
+std::unique_ptr<IActorIntentProvider> CreateFreeplayProvider()
+{
+    if (g_freeplay.live.provider == "claude_cli")
+        return std::make_unique<ClaudeCliActorIntentProvider>(g_freeplay.live.cli, CreateProcessCliRunner());
+    return CreateLiveActorIntentProvider(LiveConfig());
 }
 
 AsyncActorProviderQueue& EnsureFreeplayQueue()
@@ -388,21 +471,33 @@ std::string Mode(const std::string& payload, bool& ok)
     if (!tokens.empty())
     {
         const std::string& requested = tokens[0];
-        if (requested == "off")
-            g_freeplay.mode = FreeplayMode::Off;
-        else if (requested == "recorded")
-            g_freeplay.mode = FreeplayMode::Recorded;
+        if (requested == "off" || requested == "recorded")
+        {
+            g_freeplay.mode = requested == "off" ? FreeplayMode::Off : FreeplayMode::Recorded;
+            g_freeplay.scheduler.SetConfig(FreeplaySchedulerConfig());
+        }
         else if (requested == "live")
         {
-            const std::string refusal = LiveModeRefusal();
-            if (!refusal.empty())
-                return Fail(ok, refusal);
-            g_freeplay.mode = FreeplayMode::Live;
+            if (g_freeplay.mode != FreeplayMode::Live)
+            {
+                std::string refusal = LiveModeRefusal();
+                LiveSettings settings;
+                if (refusal.empty())
+                    refusal = LoadLiveSettings(settings);
+                if (!refusal.empty())
+                    return Fail(ok, refusal);
+                g_freeplay.live = settings;
+                g_freeplay.scheduler.SetConfig(SchedulerConfigFor(settings));
+                g_freeplay.mode = FreeplayMode::Live;
+            }
         }
         else
             return Fail(ok, "usage: ai.freeplay.mode [off|recorded|live]");
     }
-    return Succeed(ok, std::string("mode=") + ModeName(g_freeplay.mode));
+    std::string reply = std::string("mode=") + ModeName(g_freeplay.mode);
+    if (g_freeplay.mode == FreeplayMode::Live)
+        reply += LiveSettingsText(g_freeplay.live);
+    return Succeed(ok, reply);
 }
 
 std::string Begin(const std::string& payload, bool& ok)
@@ -564,6 +659,7 @@ std::string Observe(const std::string& payload, bool& ok)
         g_freeplay.scheduler.OnDecision(ownerId, true, g_freeplay.nowMs);
         return Fail(ok, submitted.reason);
     }
+    g_freeplay.submissions.push_back(g_freeplay.nowMs);
     PendingRequest request;
     request.ownerId = ownerId;
     request.epoch = stored.observation.epoch;
@@ -645,7 +741,7 @@ std::string Tick(const std::string& payload, bool& ok)
     if (g_freeplay.mode == FreeplayMode::Off)
         return Succeed(ok, out);
 
-    for (const uint64_t ownerId : scheduler.TakeObservationRequests(population, nowMs))
+    for (const uint64_t ownerId : scheduler.TakeObservationRequests(population, nowMs, CallBudget(nowMs)))
     {
         const FreeplayOwner* owner = population.FindOwner(ownerId);
         HandedOutWake wake;

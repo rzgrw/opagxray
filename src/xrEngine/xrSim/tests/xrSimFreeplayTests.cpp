@@ -1380,12 +1380,12 @@ bool TestLiveModeRefusalOrder()
     ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "mode still off without a model") && ok;
     SetEnvironment("XRAY_AGENT_MODEL", "test-model");
     const VerbReply withModel = Verb("ai.freeplay.mode", "live");
-    ok = Expect(withModel.ok ? withModel.text == "mode=live" : withModel.text == "transport_unavailable",
+    ok = Expect(withModel.ok ? withModel.text.rfind("mode=live ", 0) == 0 : withModel.text == "transport_unavailable",
         ("with a model only the transport can refuse: " + withModel.text).c_str()) && ok;
     ClearProviderEnvironment();
     RequireVerb("ai.reset");
     StartLive({});   // an installed test provider needs no environment
-    return Expect(RequireVerb("ai.freeplay.mode") == "mode=live", "test provider satisfies live mode") && ok;
+    return Expect(RequireVerb("ai.freeplay.mode").rfind("mode=live ", 0) == 0, "test provider satisfies live mode") && ok;
 }
 
 bool TestBlockedEventRewakesOwner()
@@ -1735,6 +1735,124 @@ bool TestCliLiveModeRefusals()
     return ok;
 }
 
+// --- live settings and the call budget ---
+
+VerbReply LiveWithTestProvider(std::unique_ptr<xrSim::IActorIntentProvider> provider)
+{
+    RequireVerb("ai.reset");
+    xrSim::SetFreeplayProviderForTests(std::move(provider));
+    return Verb("ai.freeplay.mode", "live");
+}
+
+std::unique_ptr<xrSim::IActorIntentProvider> NoReplies()
+{
+    return std::make_unique<xrSim::RecordedActorIntentProvider>(std::vector<std::string>{});
+}
+
+std::string ObserveLines(const std::string& tick)
+{
+    std::istringstream lines(tick);
+    std::string line, out;
+    while (std::getline(lines, line))
+        if (line.rfind("observe ", 0) == 0)
+            out += line + "\n";
+    return out;
+}
+
+bool TestLiveSettingsFromEnvironment()
+{
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_FREEPLAY_MAX_IN_FLIGHT", "3");
+    SetEnvironment("XRAY_FREEPLAY_CALLS_PER_MINUTE", "10");
+    SetEnvironment("XRAY_FREEPLAY_RECONSIDER_MS", "120000");
+    SetEnvironment("XRAY_FREEPLAY_MIN_WAKE_MS", "5000");
+    const VerbReply live = LiveWithTestProvider(NoReplies());
+    const std::string expected = "mode=live provider=anthropic model=- max_in_flight=3 calls_per_minute=10 "
+                                 "reconsider_ms=120000 min_wake_ms=5000";
+    bool ok = Expect(live.ok && live.text == expected, ("settings echoed: " + live.text).c_str());
+    ok = Expect(RequireVerb("ai.freeplay.mode") == expected, "a mode query echoes the settings too") && ok;
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", FiveSquads());
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "0")) ==
+            "observe 1 group 500 1\nobserve 2 group 501 1\nobserve 3 group 502 1\n",
+        "max_in_flight 3 hands out three owners") && ok;
+
+    const std::vector<std::pair<const char*, const char*>> bad{{"XRAY_FREEPLAY_MAX_IN_FLIGHT", "9"},
+        {"XRAY_FREEPLAY_MAX_IN_FLIGHT", "0"}, {"XRAY_FREEPLAY_MAX_IN_FLIGHT", "two"},
+        {"XRAY_FREEPLAY_CALLS_PER_MINUTE", "-1"}, {"XRAY_FREEPLAY_RECONSIDER_MS", "59999"},
+        {"XRAY_FREEPLAY_RECONSIDER_MS", "86400001"}, {"XRAY_FREEPLAY_MIN_WAKE_MS", "4999"},
+        {"XRAY_FREEPLAY_MIN_WAKE_MS", "3600001"}};
+    for (const auto& item : bad)
+    {
+        ClearProviderEnvironment();
+        SetEnvironment(item.first, item.second);
+        const VerbReply refused = LiveWithTestProvider(NoReplies());
+        ok = Expect(!refused.ok && refused.text == std::string("invalid_setting:") + item.first,
+            (std::string("bad ") + item.first + "=" + item.second + ": " + refused.text).c_str()) && ok;
+        ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "a refused setting leaves the mode off") && ok;
+    }
+
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
+    SetEnvironment("XRAY_AGENT_MODEL", kCliModel);
+    const VerbReply cli = LiveWithTestProvider(NoReplies());
+    ok = Expect(cli.ok && cli.text == "mode=live provider=claude_cli model=claude-sonnet-5-5 max_in_flight=1 "
+                                      "calls_per_minute=6 reconsider_ms=600000 min_wake_ms=45000",
+        ("claude_cli defaults: " + cli.text).c_str()) && ok;
+    ClearProviderEnvironment();
+    const VerbReply anthropic = LiveWithTestProvider(NoReplies());
+    ok = Expect(anthropic.ok && anthropic.text == "mode=live provider=anthropic model=- max_in_flight=2 "
+                                                  "calls_per_minute=0 reconsider_ms=600000 min_wake_ms=45000",
+        ("anthropic defaults: " + anthropic.text).c_str()) && ok;
+    ok = Expect(RequireVerb("ai.freeplay.mode", "off") == "mode=off", "mode off has no settings tail") && ok;
+    RequireVerb("ai.reset");
+    return ok;
+}
+
+bool TestCallsPerMinuteCap()
+{
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_FREEPLAY_CALLS_PER_MINUTE", "2");
+    SetEnvironment("XRAY_FREEPLAY_MAX_IN_FLIGHT", "8");
+    const VerbReply live = LiveWithTestProvider(std::make_unique<CoastProvider>(""));
+    bool ok = Expect(live.ok, ("live with a cap: " + live.text).c_str());
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", FiveSquads());
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "0")) == "observe 1 group 500 1\nobserve 2 group 501 1\n",
+        "cap 2: two owners handed out") && ok;
+    RequireVerb("ai.freeplay.observe", ObservationFor(1, 1, 1, 0));   // submitted at 0
+    RequireVerb("ai.freeplay.tick", "1000");
+    RequireVerb("ai.freeplay.observe", ObservationFor(2, 1, 1, 0));   // submitted at 1000
+    for (int i = 0; i < 200 && !Contains(OwnerLine(2), "state=idle"); ++i)
+    {
+        ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "1000")).empty(), "nothing more while settling") && ok;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ok = Expect(Contains(OwnerLine(1), "state=idle") && Contains(OwnerLine(2), "state=idle"),
+        "both replies settled and freed their slots") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "30000")).empty(), "free slots but no budget at 30000") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "59999")).empty(), "no budget 1 ms before the window") && ok;
+    ok = Expect(Contains(OwnerLine(3), "state=queued"), "the third owner keeps its place in the queue") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "60000")) == "observe 3 group 502 1\n",
+        "the first submission leaves the window at 60000: one owner") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "60500")).empty(),
+        "a hand-out awaiting its observation counts against the cap") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "61000")) == "observe 4 group 503 1\n",
+        "the second submission leaves the window at 61000") && ok;
+
+    // Recorded mode ignores the cap.
+    RequireVerb("ai.reset");
+    SetEnvironment("XRAY_FREEPLAY_CALLS_PER_MINUTE", "1");
+    RequireVerb("ai.freeplay.mode", "recorded");
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", FiveSquads());
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "0")) == "observe 1 group 500 1\nobserve 2 group 501 1\n",
+        "recorded mode ignores the cap") && ok;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return ok;
+}
+
 #if !defined(_WIN32)
 // True when this process has no child left, reaped or not.
 bool NoChildLeft()
@@ -1907,6 +2025,8 @@ int main()
     ok = TestCliLiveDecisionFlow() && ok;
     ok = TestCliLiveModeRefusals() && ok;
     ok = TestProcessRunnerEchoAndTimeout() && ok;
+    ok = TestLiveSettingsFromEnvironment() && ok;
+    ok = TestCallsPerMinuteCap() && ok;
     RequireVerb("ai.reset");
     return ok ? 0 : 1;
 }
