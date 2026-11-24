@@ -3,6 +3,7 @@
 #include "xrSim/xrSimActorProvider.h"
 #include "xrSim/xrSimAgentProvider.h"
 #include "xrSim/xrSimAnthropicTransport.h"
+#include "xrSim/xrSimClaudeCliProvider.h"
 #include "xrSim/xrSimFreeplay.h"
 #include "xrSim/xrSimFreeplayDecision.h"
 #include "xrSim/xrSimFreeplayScheduler.h"
@@ -142,6 +143,61 @@ std::string BindingText(const FreeplayOwner& owner)
 
 AgentProviderConfig LiveConfig() { return LoadAgentProviderConfigFromEnvironment(); }
 
+std::string EnvironmentValue(const char* name)
+{
+    const char* value = std::getenv(name);
+    return value != nullptr ? std::string(value) : std::string();
+}
+
+// A model or executable handed to the CLI: one token of [A-Za-z0-9._/@:+-], never an option.
+bool IsCliToken(const std::string& value)
+{
+    if (value.empty() || value[0] == '-')
+        return false;
+    for (const char c : value)
+    {
+        const bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' ||
+            c == '_' || c == '/' || c == '@' || c == ':' || c == '+' || c == '-';
+        if (!allowed)
+            return false;
+    }
+    return true;
+}
+
+// The claude_cli provider's settings, read from the environment directly: LoadAgentProviderConfigFromEnvironment
+// knows neither XRAY_AGENT_CLI nor this provider's 60000 ms default timeout.
+struct CliSettings
+{
+    ClaudeCliConfig config;
+    std::string refusal;   // empty when the settings are usable
+};
+
+CliSettings LoadCliSettings()
+{
+    CliSettings settings;
+    settings.config.model = EnvironmentValue("XRAY_AGENT_MODEL");
+    const std::string cli = EnvironmentValue("XRAY_AGENT_CLI");
+    settings.config.executable = cli.empty() ? std::string("claude") : cli;
+    if (settings.config.model.empty())
+        settings.refusal = "missing_model";
+    else if (!IsCliToken(settings.config.model))
+        settings.refusal = "invalid_model";
+    else if (!IsCliToken(settings.config.executable))
+        settings.refusal = "invalid_cli";
+    else if (!IsCliExecutableAvailable(settings.config.executable))
+        settings.refusal = "cli_unavailable";
+    const std::string timeout = EnvironmentValue("XRAY_AGENT_TIMEOUT_MS");
+    if (settings.refusal.empty() && !timeout.empty())
+    {
+        uint64_t timeoutMs = 0;
+        if (!ParseU64(timeout, ~0ull, timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000)
+            settings.refusal = "invalid_setting:XRAY_AGENT_TIMEOUT_MS";
+        else
+            settings.config.timeoutMs = static_cast<uint32_t>(timeoutMs);
+    }
+    return settings;
+}
+
 // Empty when live mode may start. The model must be named in XRAY_AGENT_MODEL: the provider's built-in
 // default model ID is a historical value that needs verification before any live use.
 std::string LiveModeRefusal()
@@ -149,6 +205,8 @@ std::string LiveModeRefusal()
     if (g_freeplayTestProvider)
         return std::string();
     const AgentProviderConfig config = LiveConfig();
+    if (config.enabled && config.provider == "claude_cli")
+        return LoadCliSettings().refusal;
     if (!config.enabled || config.provider != "anthropic")
         return "provider_disabled";
     if (config.apiKey.empty())
@@ -161,10 +219,18 @@ std::string LiveModeRefusal()
     return std::string();
 }
 
+std::unique_ptr<IActorIntentProvider> CreateFreeplayProvider()
+{
+    const AgentProviderConfig config = LiveConfig();
+    if (config.enabled && config.provider == "claude_cli")
+        return std::make_unique<ClaudeCliActorIntentProvider>(LoadCliSettings().config, CreateProcessCliRunner());
+    return CreateLiveActorIntentProvider(config);
+}
+
 AsyncActorProviderQueue& EnsureFreeplayQueue()
 {
     if (!g_freeplayQueue)
-        g_freeplayQueue = std::make_unique<AsyncActorProviderQueue>(CreateLiveActorIntentProvider(LiveConfig()));
+        g_freeplayQueue = std::make_unique<AsyncActorProviderQueue>(CreateFreeplayProvider());
     return *g_freeplayQueue;
 }
 

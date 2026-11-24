@@ -27,6 +27,8 @@ add_library(xrSimCore STATIC
     xrSim/xrSimAnthropicTransport.h
     xrSim/xrSimBridge.cpp
     xrSim/xrSimBridge.h
+    xrSim/xrSimClaudeCliProvider.cpp
+    xrSim/xrSimClaudeCliProvider.h
     xrSim/xrSimFreeplay.cpp
     xrSim/xrSimFreeplay.h
     xrSim/xrSimFreeplayBridge.cpp
