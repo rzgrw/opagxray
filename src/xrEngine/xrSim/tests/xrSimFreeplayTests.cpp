@@ -994,8 +994,12 @@ void StartFreeplay(const char* mode)
     RequireSetup(xrSim::FreeplayResult{RequireVerb("ai.freeplay.sync", kTwoGroups) == "owners=3", "owners=3"});
 }
 
+// With no provider variable the provider resolves to claude_cli (1 in flight, 6 calls per minute); these flow
+// tests keep the anthropic scheduler defaults (2 in flight, no cap) unless a test names the provider itself.
 void StartLiveWith(std::unique_ptr<xrSim::IActorIntentProvider> provider, const std::string& snapshot)
 {
+    if (std::getenv("XRAY_AGENT_PROVIDER") == nullptr)
+        SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
     RequireVerb("ai.reset");
     xrSim::SetFreeplayProviderForTests(std::move(provider));
     RequireVerb("ai.freeplay.mode", "live");
@@ -1351,9 +1355,11 @@ bool TestModelCoastIsKept()
 bool TestLiveModeRefusedWithoutProvider()
 {
     ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_CLI", "/nonexistent/claude");   // no variable and no key: claude_cli, not found
     RequireVerb("ai.reset");
     const VerbReply live = Verb("ai.freeplay.mode", "live");
-    bool ok = Expect(!live.ok && live.text == "missing_api_key", ("live refused: " + live.text).c_str());
+    bool ok = Expect(!live.ok && live.text == "cli_unavailable", ("live refused: " + live.text).c_str());
+    ClearProviderEnvironment();
     ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "mode still off") && ok;
     const VerbReply observe = Verb("ai.freeplay.observe", kSquadObservation);
     return Expect(!observe.ok && observe.text == "mode_off", "observe refused in mode off") && ok;
@@ -1703,10 +1709,11 @@ bool TestCliLiveModeRefusals()
     ClearProviderEnvironment();
     RequireVerb("ai.reset");
     SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
-    const VerbReply noModel = Verb("ai.freeplay.mode", "live");
-    bool ok = Expect(!noModel.ok && noModel.text == "missing_model", ("no model: " + noModel.text).c_str());
-    SetEnvironment("XRAY_AGENT_MODEL", "a b");
     SetEnvironment("XRAY_AGENT_CLI", "/nonexistent/claude");
+    const VerbReply noModel = Verb("ai.freeplay.mode", "live");
+    bool ok = Expect(!noModel.ok && noModel.text == "cli_unavailable",
+        ("no model is no refusal for claude_cli (it uses sonnet): " + noModel.text).c_str());
+    SetEnvironment("XRAY_AGENT_MODEL", "a b");
     const VerbReply badModel = Verb("ai.freeplay.mode", "live");
     ok = Expect(!badModel.ok && badModel.text == "invalid_model", ("model with a space: " + badModel.text).c_str()) && ok;
     SetEnvironment("XRAY_AGENT_MODEL", kCliModel);
@@ -1767,7 +1774,7 @@ bool TestLiveSettingsFromEnvironment()
     SetEnvironment("XRAY_FREEPLAY_RECONSIDER_MS", "120000");
     SetEnvironment("XRAY_FREEPLAY_MIN_WAKE_MS", "5000");
     const VerbReply live = LiveWithTestProvider(NoReplies());
-    const std::string expected = "mode=live provider=anthropic model=- max_in_flight=3 calls_per_minute=10 "
+    const std::string expected = "mode=live provider=claude_cli model=sonnet max_in_flight=3 calls_per_minute=10 "
                                  "reconsider_ms=120000 min_wake_ms=5000";
     bool ok = Expect(live.ok && live.text == expected, ("settings echoed: " + live.text).c_str());
     ok = Expect(RequireVerb("ai.freeplay.mode") == expected, "a mode query echoes the settings too") && ok;
@@ -1800,6 +1807,7 @@ bool TestLiveSettingsFromEnvironment()
                                       "calls_per_minute=6 reconsider_ms=600000 min_wake_ms=45000",
         ("claude_cli defaults: " + cli.text).c_str()) && ok;
     ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
     const VerbReply anthropic = LiveWithTestProvider(NoReplies());
     ok = Expect(anthropic.ok && anthropic.text == "mode=live provider=anthropic model=- max_in_flight=2 "
                                                   "calls_per_minute=0 reconsider_ms=600000 min_wake_ms=45000",
@@ -1971,6 +1979,92 @@ bool TestWakePromptNamesBlockedSite()
             stripped.erase(at, std::string(line).size());
     }
     return Expect(stripped == plain, "otherwise the same prompt") && ok;
+}
+
+// --- provider resolution and the last provider failure ---
+
+bool TestProviderResolvesFromEnvironment()
+{
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_CLI", "/bin/cat");   // stands in for an installed CLI; nothing observes, nothing runs
+    RequireVerb("ai.reset");
+    const VerbReply plain = Verb("ai.freeplay.mode", "live");
+    bool ok = Expect(plain.ok && plain.text.rfind("mode=live provider=claude_cli model=sonnet max_in_flight=1 "
+                                                  "calls_per_minute=6 ", 0) == 0,
+        ("no variable and no key: claude_cli with sonnet: " + plain.text).c_str());
+    for (const char* key : {"ANTHROPIC_API_KEY", "XRAY_AGENT_API_KEY"})
+    {
+        RequireVerb("ai.reset");
+        SetEnvironment(key, "not-a-real-key");
+        const VerbReply keyed = Verb("ai.freeplay.mode", "live");
+        ok = Expect(!keyed.ok && keyed.text == "missing_model",
+            (std::string("a key in ") + key + " resolves to anthropic, which needs a model: " + keyed.text).c_str()) && ok;
+        SetEnvironment(key, nullptr);
+    }
+    RequireVerb("ai.reset");
+    SetEnvironment("ANTHROPIC_API_KEY", "not-a-real-key");
+    SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
+    const VerbReply explicitCli = Verb("ai.freeplay.mode", "live");
+    ok = Expect(explicitCli.ok && explicitCli.text.rfind("mode=live provider=claude_cli model=sonnet ", 0) == 0,
+        ("an explicit provider wins over a key: " + explicitCli.text).c_str()) && ok;
+    RequireVerb("ai.reset");
+    SetEnvironment("ANTHROPIC_API_KEY", nullptr);
+    SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
+    const VerbReply explicitAnthropic = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!explicitAnthropic.ok && explicitAnthropic.text == "missing_api_key",
+        ("an explicit anthropic without a key: " + explicitAnthropic.text).c_str()) && ok;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return ok;
+}
+
+// Answers with a provider-originated coast for each listed reason in turn, then with a model coast.
+class SequenceProvider final : public xrSim::IActorIntentProvider
+{
+public:
+    explicit SequenceProvider(std::vector<std::string> reasons) : m_reasons(std::move(reasons)) {}
+    xrSim::ActorProviderResult Wake(const xrSim::ActorWakeContext&) override
+    {
+        xrSim::ActorProviderResult result;
+        result.ok = true;
+        result.coast = true;
+        result.plan.coast = true;
+        result.coastReason = m_cursor < m_reasons.size() ? m_reasons[m_cursor++] : std::string();
+        result.error = result.coastReason.empty() ? std::string() : "exit=1 Please run /login";
+        result.provider = "test-sequence";
+        result.model = "fixture";
+        return result;
+    }
+
+private:
+    std::vector<std::string> m_reasons;
+    size_t m_cursor = 0;
+};
+
+bool TestLastFailureInModeReply()
+{
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
+    StartLiveWith(std::make_unique<SequenceProvider>(std::vector<std::string>{"cli_exit"}), FiveSquads());
+    bool ok = Expect(!Contains(RequireVerb("ai.freeplay.mode"), "last_failure"), "no failure yet");
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", ObservationFor(1, 1, 1, 0));
+    TickUntilLogged("source=hold", 0);
+    const std::string failed = RequireVerb("ai.freeplay.mode");
+    ok = Expect(failed.size() >= std::string(" last_failure=cli_exit").size() &&
+            failed.compare(failed.size() - std::string(" last_failure=cli_exit").size(), std::string::npos,
+                " last_failure=cli_exit") == 0,
+        ("last_failure is the last field and one token: " + failed).c_str()) && ok;
+    // Once the 30000 ms backoff has ended the next owner is handed out and gets a model coast.
+    ok = Expect(Contains(RequireVerb("ai.freeplay.tick", "30001"), "observe 3 "), "owner 3 handed out after the backoff") &&
+        ok;
+    RequireVerb("ai.freeplay.observe", ObservationFor(3, 1, 1, 0));
+    TickUntilLogged("verdict=kept", 30001);
+    const std::string recovered = RequireVerb("ai.freeplay.mode");
+    ok = Expect(!Contains(recovered, "last_failure"), ("a success clears it: " + recovered).c_str()) && ok;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return ok;
 }
 
 #if !defined(_WIN32)
@@ -2151,6 +2245,8 @@ int main()
     ok = TestRecentlyBlockedExpiresAndClears() && ok;
     ok = TestBlockedStayLoopIsBroken() && ok;
     ok = TestWakePromptNamesBlockedSite() && ok;
+    ok = TestProviderResolvesFromEnvironment() && ok;
+    ok = TestLastFailureInModeReply() && ok;
     RequireVerb("ai.reset");
     return ok ? 0 : 1;
 }

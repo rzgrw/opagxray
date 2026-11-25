@@ -83,6 +83,7 @@ struct FreeplayRuntime
     std::map<uint64_t, FreeplayObjective> previousObjective; // in force before the owner's last committed decision
     LiveSettings live;
     std::map<uint64_t, BlockedSite> blocked;      // until kBlockedMemoryMs, an arrived event, retire or begin
+    std::string lastFailure;                      // reason of the latest provider failure (one token)
     std::deque<uint64_t> submissions;             // tick time of each live provider submission in the call window
 };
 
@@ -167,7 +168,30 @@ std::string BindingText(const FreeplayOwner& owner)
     return std::string(owner.binding == FreeplayBinding::Group ? "group:" : "npc:") + std::to_string(owner.bindingId);
 }
 
-AgentProviderConfig LiveConfig() { return LoadAgentProviderConfigFromEnvironment(); }
+// The provider live mode uses: XRAY_AGENT_PROVIDER when set; otherwise anthropic when an API key is set
+// (ANTHROPIC_API_KEY or XRAY_AGENT_API_KEY), else claude_cli, the player's own Claude Code login.
+AgentProviderConfig LiveConfig()
+{
+    AgentProviderConfig config = LoadAgentProviderConfigFromEnvironment();
+    const char* provider = std::getenv("XRAY_AGENT_PROVIDER");
+    if (provider == nullptr || *provider == '\0')
+        config.provider = config.apiKey.empty() ? "claude_cli" : "anthropic";
+    return config;
+}
+
+// A provider failure as one token for the mode reply: the reason only, never the error detail.
+std::string FailureToken(const std::string& reason)
+{
+    std::string token = reason.empty() ? std::string("provider_error") : reason.substr(0, 64);
+    for (char& c : token)
+    {
+        const bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ||
+            c == '.' || c == ':' || c == '-';
+        if (!allowed)
+            c = '_';
+    }
+    return token;
+}
 
 std::string EnvironmentValue(const char* name)
 {
@@ -201,12 +225,11 @@ struct CliSettings
 CliSettings LoadCliSettings()
 {
     CliSettings settings;
-    settings.config.model = EnvironmentValue("XRAY_AGENT_MODEL");
+    const std::string model = EnvironmentValue("XRAY_AGENT_MODEL");
+    settings.config.model = model.empty() ? std::string("sonnet") : model;   // the CLI's own alias
     const std::string cli = EnvironmentValue("XRAY_AGENT_CLI");
     settings.config.executable = cli.empty() ? std::string("claude") : cli;
-    if (settings.config.model.empty())
-        settings.refusal = "missing_model";
-    else if (!IsCliToken(settings.config.model))
+    if (!IsCliToken(settings.config.model))
         settings.refusal = "invalid_model";
     else if (!IsCliToken(settings.config.executable))
         settings.refusal = "invalid_cli";
@@ -268,7 +291,10 @@ std::string LoadLiveSettings(LiveSettings& settings)
     const std::string model = EnvironmentValue("XRAY_AGENT_MODEL");
     settings.model = model.empty() ? std::string("-") : model;
     if (cli)
+    {
         settings.cli = LoadCliSettings().config;
+        settings.model = settings.cli.model;
+    }
     settings.maxInFlight = cli ? 1 : 2;
     settings.callsPerMinute = cli ? 6 : 0;
     if (!ReadSetting("XRAY_FREEPLAY_MAX_IN_FLIGHT", 1, 8, settings.maxInFlight))
@@ -418,10 +444,12 @@ void SettleReply(const PendingRequest& request, const ActorWakePollResult& polle
             entry.verdict = polled.reason;
         else
             entry.verdict = result.error.empty() ? result.coastReason : result.coastReason + ":" + result.error;
+        g_freeplay.lastFailure = FailureToken(polled.ok ? result.coastReason : polled.reason);
         g_freeplay.ledger.Append(entry);
         g_freeplay.scheduler.OnDecision(request.ownerId, true, g_freeplay.nowMs);
         return;
     }
+    g_freeplay.lastFailure.clear();   // the provider answered
     if (!result.ok)
     {
         entry.verdict = "malformed:" + (result.error.empty() ? std::string("provider_error") : result.error);
@@ -525,7 +553,12 @@ std::string Mode(const std::string& payload, bool& ok)
     }
     std::string reply = std::string("mode=") + ModeName(g_freeplay.mode);
     if (g_freeplay.mode == FreeplayMode::Live)
+    {
         reply += LiveSettingsText(g_freeplay.live);
+        // While the provider backs off, the reason that started it: the adapter turns it into a message.
+        if (!g_freeplay.lastFailure.empty() && g_freeplay.scheduler.BackoffActive(g_freeplay.nowMs))
+            reply += " last_failure=" + g_freeplay.lastFailure;
+    }
     return Succeed(ok, reply);
 }
 
@@ -700,6 +733,7 @@ std::string Observe(const std::string& payload, bool& ok)
     {
         FreeplayLedgerEntry entry = DecisionEntry(ownerId, stored, "hold");
         entry.verdict = submitted.reason;
+        g_freeplay.lastFailure = FailureToken(submitted.reason);
         g_freeplay.ledger.Append(entry);
         g_freeplay.scheduler.OnDecision(ownerId, true, g_freeplay.nowMs);
         return Fail(ok, submitted.reason);
