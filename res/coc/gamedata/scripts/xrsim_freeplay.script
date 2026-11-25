@@ -256,9 +256,14 @@ function refusal_message(reason)
 	elseif reason == "cli_unavailable" then
 		return "AI freeplay is off: Claude Code was not found. Install it, sign in by running `claude`, then start the game again."
 	elseif reason == "missing_api_key" then
-		return "AI freeplay is off: No Anthropic API key is set."
+		return "AI freeplay is off: XRAY_AGENT_PROVIDER is anthropic but no Anthropic API key is set. Set " ..
+			"ANTHROPIC_API_KEY, or unset XRAY_AGENT_PROVIDER to play on your Claude subscription, then start the game again."
 	elseif reason == "missing_model" then
-		return "AI freeplay is off: No model is set (XRAY_AGENT_MODEL)."
+		return "AI freeplay is off: no model is set for the Anthropic API. Set XRAY_AGENT_MODEL to a model name, " ..
+			"then start the game again."
+	elseif reason == "unsupported_platform" then
+		return "AI freeplay is off: playing on the Claude subscription through Claude Code is not supported on this " ..
+			"system yet (macOS and Linux only)."
 	elseif reason == "invalid_model" then
 		return "AI freeplay is off: the model name (XRAY_AGENT_MODEL) must be one word."
 	elseif reason == "provider_disabled" then

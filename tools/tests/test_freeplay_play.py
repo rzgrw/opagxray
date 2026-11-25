@@ -2,6 +2,8 @@
 import json
 import os
 from pathlib import Path
+import re
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -57,11 +59,11 @@ class LauncherTests(unittest.TestCase):
         self.environ = {'PATH': '/usr/bin', 'HOME': '/home/p', 'ANTHROPIC_API_KEY': 'k1', 'XRAY_AGENT_API_KEY': 'k2',
                         'CLAUDECODE': '1', 'CLAUDE_CODE_SESSION_ID': 's', 'CLAUDE_CONFIG_DIR': '/home/p/.claude'}
 
-    def main(self, *args, which=None, run=None):
+    def main(self, *args, which=None, run=None, execve=None):
         argv = ['--runtime', str(self.runtime), *args]
         return freeplay_play.main(argv, environ=self.environ, run=run or self.run,
                                   which=which or (lambda name: str(self.cli) if name == 'claude' else None),
-                                  execve=lambda path, argv, env: self.execs.append((path, argv, env)),
+                                  execve=execve or (lambda path, argv, env: self.execs.append((path, argv, env))),
                                   chdir=lambda path: self.lines.append(f'chdir {path}'),
                                   system='Darwin', machine='arm64', out=self.lines.append)
 
@@ -175,6 +177,40 @@ class LauncherTests(unittest.TestCase):
         story.write_bytes(b'; my own edit\r\n')
         self.assertStopped(self.main(), 'Cannot install the freeplay files')
         self.assertEqual(b'; my own edit\r\n', story.read_bytes())
+
+    def test_resolved_cli_path_must_be_usable_by_the_game(self):
+        spaced = self.root / 'my apps' / 'claude'
+        spaced.parent.mkdir()
+        spaced.write_text('#!/bin/sh\n')
+        spaced.chmod(0o755)
+        self.assertStopped(self.main(which=lambda name: str(spaced)),
+                           f'Claude Code was found at {spaced}, but the game cannot start it from there: the path may '
+                           'contain only letters, digits and ._/@:+- characters. Pass --cli with a path without '
+                           'spaces (a symlink works).')
+        self.assertEqual([], self.run.calls)
+
+    def test_dry_run_command_is_copy_pasteable(self):
+        spaced_runtime = self.root / 'game folder'
+        self.runtime.rename(spaced_runtime)
+        self.runtime = spaced_runtime
+        self.assertEqual(0, self.main('--dry-run'))
+        game = [str(self.binary), '-agent_bridge', 'appdata/agent_bridge.sock', '-xrsim_freeplay', 'live']
+        self.assertIn(f'would run in {shlex.quote(str(spaced_runtime))}: {shlex.join(game)}', self.output())
+        self.assertIn(f'XRAY_AGENT_CLI={shlex.quote(str(self.cli))}', self.output())
+
+    def test_exec_failure_is_one_sentence(self):
+        def failing(path, argv, env):
+            raise OSError(8, 'Exec format error')
+        self.assertEqual(1, self.main(execve=failing))
+        self.assertIn('freeplay_play: The game could not be started (Exec format error).', self.output())
+        self.assertNotIn('Traceback', self.output())
+
+    def test_removed_variables_match_the_engine(self):
+        source = (freeplay_runtime.REPO / 'src/xrEngine/xrSim/xrSimClaudeCliProvider.cpp').read_text()
+        block = source.split('// BEGIN removed-environment', 1)[1].split('// END removed-environment', 1)[0]
+        engine = re.findall(r'"([A-Z0-9_]+)"', block)
+        self.assertEqual(list(freeplay_play.KEY_VARIABLES + freeplay_play.SESSION_VARIABLES), engine)
+        self.assertIn('ANTHROPIC_BASE_URL', freeplay_play.KEY_VARIABLES)
 
     def test_windows_is_not_supported_yet(self):
         rc = freeplay_play.main(['--runtime', str(self.runtime)], environ=self.environ, run=self.run,

@@ -26,8 +26,13 @@ class AdapterMessagesTest(unittest.TestCase):
     def test_refusals_say_what_to_do(self):
         self.assertIn('Claude Code was not found. Install it, sign in by running `claude`, then start the game again.',
                       self.lines['refusal:cli_unavailable'])
-        self.assertIn('No Anthropic API key is set.', self.lines['refusal:missing_api_key'])
-        self.assertIn('No model is set (XRAY_AGENT_MODEL).', self.lines['refusal:missing_model'])
+        self.assertEqual('AI freeplay is off: XRAY_AGENT_PROVIDER is anthropic but no Anthropic API key is set. Set '
+                         'ANTHROPIC_API_KEY, or unset XRAY_AGENT_PROVIDER to play on your Claude subscription, '
+                         'then start the game again.', self.lines['refusal:missing_api_key'])
+        self.assertEqual('AI freeplay is off: no model is set for the Anthropic API. Set XRAY_AGENT_MODEL to a model '
+                         'name, then start the game again.', self.lines['refusal:missing_model'])
+        self.assertEqual('AI freeplay is off: playing on the Claude subscription through Claude Code is not supported '
+                         'on this system yet (macOS and Linux only).', self.lines['refusal:unsupported_platform'])
         self.assertIn('XRAY_FREEPLAY_MAX_IN_FLIGHT', self.lines['refusal:invalid_setting:XRAY_FREEPLAY_MAX_IN_FLIGHT'])
         self.assertIn('XRAY_AGENT_PROVIDER', self.lines['refusal:provider_disabled'])
 

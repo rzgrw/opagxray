@@ -15,8 +15,9 @@ repo's copy) and the story-theme fix (a differing override already there is refu
 through tools/freeplay_runtime.py, and replaces itself with the game, started from inside the runtime with
 `-agent_bridge appdata/agent_bridge.sock -xrsim_freeplay <mode>`. For live mode the game's environment gets
 XRAY_AGENT_PROVIDER=claude_cli, XRAY_AGENT_MODEL, XRAY_FREEPLAY_CALLS_PER_MINUTE and XRAY_AGENT_CLI (the
-CLI found above); API key variables are removed so the subscription is what gets used, and so are the
-variables that tie a process to a running Claude Code session. --background adds
+CLI found above); API key and endpoint variables are removed so the subscription is what gets used, and so are
+the variables that tie a process to a running Claude Code session (the engine removes the same list again from
+the CLI's own environment). --background adds
 `-agent_background -agent_sound` for automated runs. --dry-run prints the checks, the files it would
 install, and the command with its environment changes, and changes nothing.
 """
@@ -25,6 +26,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -37,7 +39,9 @@ DEFAULT_RUNTIME = REPO / 'build' / 'runtime' / 'play'
 DEFAULT_MODEL = 'sonnet'
 DEFAULT_CALLS_PER_MINUTE = 6
 BRIDGE = 'appdata/agent_bridge.sock'
-KEY_VARIABLES = ('ANTHROPIC_API_KEY', 'XRAY_AGENT_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
+# Removed from the game's environment. The engine removes the same list from the CLI child's environment
+# (CliRemovedEnvironmentNames in src/xrEngine/xrSim/xrSimClaudeCliProvider.cpp); a test keeps the two identical.
+KEY_VARIABLES = ('ANTHROPIC_API_KEY', 'XRAY_AGENT_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL')
 SESSION_VARIABLES = ('CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_AGENT_SDK_VERSION', 'CLAUDE_CODE_SESSION_ID',
                      'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_CHILD_SESSION',
                      'CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ATTENDED',
@@ -74,6 +78,9 @@ def find_cli(cli_arg, environ, which):
     found = which(name)
     if not found:
         raise Stop('Claude Code was not found. Install it, sign in by running `claude`, then try again.')
+    if not is_token(found):   # the engine applies the same rule to XRAY_AGENT_CLI and would refuse it (invalid_cli)
+        raise Stop(f'Claude Code was found at {found}, but the game cannot start it from there: the path may contain '
+                   'only letters, digits and ._/@:+- characters. Pass --cli with a path without spaces (a symlink works).')
     return found
 
 
@@ -176,8 +183,8 @@ def main(argv=None, environ=None, run=subprocess.run, which=shutil.which, execve
         out('checks passed: engine, runtime' + (', Claude Code signed in' if args.mode == 'live' else ''))
         for path, action in actions:
             out(f'would {action if action != "up to date" else "leave (up to date)"}: {path}')
-        out(f'would run in {runtime}: {" ".join(argv_game)}')
-        out('environment additions: ' + (' '.join(f'{k}={v}' for k, v in added.items()) or 'none'))
+        out(f'would run in {shlex.quote(str(runtime))}: {shlex.join(argv_game)}')
+        out('environment additions: ' + (' '.join(f'{k}={shlex.quote(v)}' for k, v in added.items()) or 'none'))
         out('environment removals: ' + (' '.join(removed) or 'none'))
         return 0
     try:
@@ -190,8 +197,12 @@ def main(argv=None, environ=None, run=subprocess.run, which=shutil.which, execve
     out(ai)
     out('Starting the game (this window now belongs to it).')
     sys.stdout.flush()
-    chdir(runtime)
-    execve(str(binary), argv_game, env)   # replaces this process; returns only in tests
+    try:
+        chdir(runtime)
+        execve(str(binary), argv_game, env)   # replaces this process; returns only in tests
+    except OSError as error:
+        out(f'freeplay_play: The game could not be started ({error.strerror or error}).')
+        return 1
     return 0
 
 
