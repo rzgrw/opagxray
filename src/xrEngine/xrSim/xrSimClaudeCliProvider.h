@@ -34,6 +34,24 @@ public:
 std::unique_ptr<ICliRunner> CreateProcessCliRunner();
 bool IsCliExecutableAvailable(const std::string& pathOrName);   // absolute path that is executable, or a bare name found on PATH
 
+// The variables removed from the CLI child's environment: API keys and endpoint (so the CLI uses the player's own
+// login) and the variables that tie a process to a running Claude Code session. tools/freeplay_play.py removes the
+// same list from the game's environment; tools/tests/test_freeplay_play.py checks the two are identical.
+const std::vector<std::string>& CliRemovedEnvironmentNames();
+std::vector<std::string> CliChildEnvironment(const std::vector<std::string>& parent);   // "NAME=value" entries, order kept
+
+// A warning the runner cannot return as a value (it happens after the result is settled): one line, handed to the
+// sink the engine installs (its log). Without a sink the line is dropped. nullptr removes the sink.
+using CliWarningSink = void (*)(const char* line);
+void SetCliWarningSink(CliWarningSink sink);
+
+#if !defined(_WIN32)
+// Reaps a child that was sent SIGKILL, polling for at most limitMs. A child that has not exited by then (one stuck in
+// uninterruptible sleep) is left unreaped with one warning, so the worker thread, and the join at quit, never block
+// on it. Returns the exit code (128 + signal when killed), or -1 when given up or not this process's child.
+int ReapKilledChild(int pid, uint32_t limitMs);
+#endif
+
 struct ClaudeCliConfig
 {
     std::string executable = "claude";

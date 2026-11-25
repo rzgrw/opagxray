@@ -2,6 +2,7 @@
 
 #include "xrSim/xrSimActorIntent.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -30,6 +31,13 @@ namespace
 const char* kIntentHeader = "xrsim_actor_intent_v1";
 const char* kSystemPrompt = "You answer with the requested schema lines only. No prose, no markdown, no code fences.";
 constexpr size_t kMaxErrorLine = 200;
+std::atomic<CliWarningSink> g_warningSink{nullptr};
+
+void Warn(const std::string& line)
+{
+    if (const CliWarningSink sink = g_warningSink.load(std::memory_order_acquire))
+        sink(line.c_str());
+}
 
 std::string Trimmed(const std::string& line)
 {
@@ -74,6 +82,7 @@ ActorProviderResult FailCli(const ClaudeCliConfig& config, const std::string& er
 constexpr size_t kMaxOutput = 1u << 20;   // stdout kept; anything beyond is read and dropped
 constexpr size_t kMaxStderr = 4096;       // enough for the first line
 constexpr int kTermGraceMs = 500;         // SIGTERM to SIGKILL
+constexpr uint32_t kReapLimitMs = 3000;   // SIGKILL to giving up on the reap
 
 using Clock = std::chrono::steady_clock;
 
@@ -141,18 +150,13 @@ int RemainingMs(Clock::time_point deadline)
     return left <= 0 ? 0 : left > 1000 ? 1000 : static_cast<int>(left);
 }
 
-// The child's environment: the game's, without API key variables, so the CLI uses its own login.
+// The child's environment: the game's, without the variables CliRemovedEnvironmentNames lists.
 std::vector<std::string> ChildEnvironment()
 {
-    std::vector<std::string> env;
+    std::vector<std::string> parent;
     for (char** item = environ; item != nullptr && *item != nullptr; ++item)
-    {
-        const std::string entry = *item;
-        if (entry.rfind("ANTHROPIC_API_KEY=", 0) == 0 || entry.rfind("XRAY_AGENT_API_KEY=", 0) == 0)
-            continue;
-        env.push_back(entry);
-    }
-    return env;
+        parent.emplace_back(*item);
+    return CliChildEnvironment(parent);
 }
 
 std::string TempDirectory()
@@ -317,17 +321,7 @@ int ProcessCliRunner::KillAndReap(pid_t pid, bool force)
     // The leader is a zombie or still running: either way the group id cannot be reused yet. SIGKILL ends
     // any process left in the group (a stubborn child, or helpers a finished child left behind).
     kill(-pid, SIGKILL);
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0)
-    {
-        if (errno != EINTR)
-            return -1;
-    }
-    if (WIFEXITED(status))
-        return WEXITSTATUS(status);
-    if (WIFSIGNALED(status))
-        return 128 + WTERMSIG(status);
-    return -1;
+    return ReapKilledChild(pid, kReapLimitMs);
 }
 
 CliRunResult ProcessCliRunner::Run(const std::vector<std::string>& argv, const std::string& stdinText, uint32_t timeoutMs)
@@ -505,7 +499,76 @@ CliRunResult ProcessCliRunner::Run(const std::vector<std::string>& argv, const s
 #endif
 } // namespace
 
+const std::vector<std::string>& CliRemovedEnvironmentNames()
+{
+    // Keep identical to KEY_VARIABLES + SESSION_VARIABLES in tools/freeplay_play.py (checked by its tests).
+    // BEGIN removed-environment
+    static const std::vector<std::string> names = {
+        "ANTHROPIC_API_KEY",
+        "XRAY_AGENT_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDECODE",
+        "CLAUDE_PID",
+        "CLAUDE_EFFORT",
+        "CLAUDE_AGENT_SDK_VERSION",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_ARTIFACT",
+        "CLAUDE_CODE_EXECPATH",
+    };
+    // END removed-environment
+    return names;
+}
+
+std::vector<std::string> CliChildEnvironment(const std::vector<std::string>& parent)
+{
+    const std::vector<std::string>& removed = CliRemovedEnvironmentNames();
+    std::vector<std::string> env;
+    for (const std::string& entry : parent)
+    {
+        const std::string name = entry.substr(0, entry.find('='));
+        if (entry.find('=') != std::string::npos && std::find(removed.begin(), removed.end(), name) != removed.end())
+            continue;
+        env.push_back(entry);
+    }
+    return env;
+}
+
+void SetCliWarningSink(CliWarningSink sink) { g_warningSink.store(sink, std::memory_order_release); }
+
 #if !defined(_WIN32)
+int ReapKilledChild(int pid, uint32_t limitMs)
+{
+    const Clock::time_point until = Clock::now() + std::chrono::milliseconds(limitMs);
+    for (;;)
+    {
+        int status = 0;
+        const pid_t rc = waitpid(static_cast<pid_t>(pid), &status, WNOHANG);
+        if (rc == static_cast<pid_t>(pid))
+        {
+            if (WIFEXITED(status))
+                return WEXITSTATUS(status);
+            if (WIFSIGNALED(status))
+                return 128 + WTERMSIG(status);
+            return -1;
+        }
+        if (rc < 0 && errno != EINTR)
+            return -1;   // not this process's child (already reaped)
+        if (Clock::now() >= until)
+            break;
+        poll(nullptr, 0, 10);
+    }
+    Warn("claude_cli: child " + std::to_string(pid) + " did not exit within " + std::to_string(limitMs) +
+        " ms after SIGKILL; left unreaped");
+    return -1;
+}
+
 std::unique_ptr<ICliRunner> CreateProcessCliRunner() { return std::make_unique<ProcessCliRunner>(); }
 
 bool IsCliExecutableAvailable(const std::string& pathOrName)

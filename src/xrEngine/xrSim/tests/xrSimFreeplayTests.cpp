@@ -20,9 +20,13 @@
 #include <cerrno>
 #include <climits>
 #include <cstdio>
+#include <csignal>
 #include <fcntl.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+extern char** environ;
 #endif
 
 namespace
@@ -1708,6 +1712,20 @@ bool TestCliLiveModeRefusals()
 {
     ClearProviderEnvironment();
     RequireVerb("ai.reset");
+#if defined(_WIN32)
+    // No Windows runner yet: claude_cli (also what an unset provider without a key resolves to) says so first.
+    const VerbReply unsupported = Verb("ai.freeplay.mode", "live");
+    bool unsupportedOk = Expect(!unsupported.ok && unsupported.text == "unsupported_platform",
+        ("windows refuses claude_cli plainly: " + unsupported.text).c_str());
+    SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
+    SetEnvironment("XRAY_AGENT_CLI", "C:/nonexistent/claude");
+    const VerbReply explicitCli = Verb("ai.freeplay.mode", "live");
+    unsupportedOk = Expect(!explicitCli.ok && explicitCli.text == "unsupported_platform",
+        ("windows refuses an explicit claude_cli: " + explicitCli.text).c_str()) && unsupportedOk;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return unsupportedOk;
+#endif
     SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
     SetEnvironment("XRAY_AGENT_CLI", "/nonexistent/claude");
     const VerbReply noModel = Verb("ai.freeplay.mode", "live");
@@ -2167,6 +2185,69 @@ bool TestProcessRunnerEchoAndTimeout()
         "executable lookup") && ok;
     return Expect(OpenDescriptorCount() == descriptors, "no descriptor leaked") && ok;
 }
+
+std::vector<std::string> g_cliWarnings;
+void CaptureCliWarning(const char* line) { g_cliWarnings.push_back(line); }
+
+// The reap after SIGKILL is polled with a limit. A child that does not exit in time (in real life one stuck in
+// uninterruptible sleep, which a test cannot produce on demand; here a child that was simply not killed) is
+// left unreaped with one warning, instead of blocking the worker and the join at quit.
+bool TestKilledChildReapIsBounded()
+{
+    g_cliWarnings.clear();
+    xrSim::SetCliWarningSink(&CaptureCliWarning);
+    char sleepPath[] = "/bin/sleep";
+    char seconds[] = "5";
+    char* argv[] = {sleepPath, seconds, nullptr};
+    pid_t pid = -1;
+    bool ok = Expect(posix_spawn(&pid, "/bin/sleep", nullptr, nullptr, argv, environ) == 0, "spawn sleep 5");
+    auto started = std::chrono::steady_clock::now();
+    const int abandoned = xrSim::ReapKilledChild(pid, 200);
+    ok = Expect(abandoned == -1 && ElapsedMs(started) < 1000, "a child that does not exit is given up after the limit") && ok;
+    ok = Expect(g_cliWarnings.size() == 1 && Contains(g_cliWarnings[0], "claude_cli") &&
+            Contains(g_cliWarnings[0], std::to_string(pid)) && Contains(g_cliWarnings[0], "200 ms"),
+        ("one warning line: " + (g_cliWarnings.empty() ? std::string("none") : g_cliWarnings[0])).c_str()) && ok;
+    kill(pid, SIGKILL);
+    started = std::chrono::steady_clock::now();
+    const int reaped = xrSim::ReapKilledChild(pid, 3000);
+    ok = Expect(reaped == 128 + SIGKILL && ElapsedMs(started) < 3000, "a killed child is reaped with its signal") && ok;
+    ok = Expect(g_cliWarnings.size() == 1, "no warning when the reap succeeds") && ok;
+    ok = Expect(NoChildLeft(), "the sleep child was reaped") && ok;
+    xrSim::SetCliWarningSink(nullptr);
+    return ok;
+}
+
+// The engine removes from the CLI child's environment exactly the variables tools/freeplay_play.py removes from
+// the game's (test_freeplay_play.py checks that the two lists are the same).
+bool TestCliChildEnvironmentIsStripped()
+{
+    const std::vector<std::string> parent = {"PATH=/usr/bin", "HOME=/home/p", "ANTHROPIC_API_KEY=k1",
+        "XRAY_AGENT_API_KEY=k2", "ANTHROPIC_AUTH_TOKEN=t", "ANTHROPIC_BASE_URL=http://proxy", "CLAUDECODE=1",
+        "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CODE_MESSAGING_SOCKET=/sock", "CLAUDE_CONFIG_DIR=/home/p/.claude",
+        "ANTHROPIC_API_KEY_NOTE=kept", "XRAY_AGENT_MODEL=sonnet", "NO_EQUALS_SIGN"};
+    const std::vector<std::string> expected = {"PATH=/usr/bin", "HOME=/home/p", "CLAUDE_CONFIG_DIR=/home/p/.claude",
+        "ANTHROPIC_API_KEY_NOTE=kept", "XRAY_AGENT_MODEL=sonnet", "NO_EQUALS_SIGN"};
+    bool ok = Expect(xrSim::CliChildEnvironment(parent) == expected, "key, endpoint and session variables removed, the rest kept");
+    const std::vector<std::string>& names = xrSim::CliRemovedEnvironmentNames();
+    for (const char* required : {"ANTHROPIC_API_KEY", "XRAY_AGENT_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+             "CLAUDECODE", "CLAUDE_CODE_SESSION_ID"})
+        ok = Expect(std::find(names.begin(), names.end(), required) != names.end(), required) && ok;
+    for (const std::string& name : names)
+        ok = Expect(xrSim::CliChildEnvironment({name + "=v"}).empty(), ("removed: " + name).c_str()) && ok;
+
+    // The real runner applies it.
+    SetEnvironment("ANTHROPIC_AUTH_TOKEN", "secret");
+    SetEnvironment("CLAUDECODE", "1");
+    SetEnvironment("CLAUDE_CONFIG_DIR", "/tmp/xrsim_config");
+    const xrSim::CliRunResult env = xrSim::CreateProcessCliRunner()->Run({"/usr/bin/env"}, "", 5000);
+    ok = Expect(env.exitCode == 0 && !Contains(env.output, "ANTHROPIC_AUTH_TOKEN") && !Contains(env.output, "CLAUDECODE=") &&
+            Contains(env.output, "CLAUDE_CONFIG_DIR=/tmp/xrsim_config\n"),
+        "the child's environment is the stripped one") && ok;
+    SetEnvironment("ANTHROPIC_AUTH_TOKEN", nullptr);
+    SetEnvironment("CLAUDECODE", nullptr);
+    SetEnvironment("CLAUDE_CONFIG_DIR", nullptr);
+    return ok;
+}
 #else
 bool TestProcessRunnerEchoAndTimeout()
 {
@@ -2247,6 +2328,10 @@ int main()
     ok = TestWakePromptNamesBlockedSite() && ok;
     ok = TestProviderResolvesFromEnvironment() && ok;
     ok = TestLastFailureInModeReply() && ok;
+#if !defined(_WIN32)
+    ok = TestKilledChildReapIsBounded() && ok;
+    ok = TestCliChildEnvironmentIsStripped() && ok;
+#endif
     RequireVerb("ai.reset");
     return ok ? 0 : 1;
 }

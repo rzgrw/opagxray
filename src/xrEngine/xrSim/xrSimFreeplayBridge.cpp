@@ -229,6 +229,10 @@ CliSettings LoadCliSettings()
     settings.config.model = model.empty() ? std::string("sonnet") : model;   // the CLI's own alias
     const std::string cli = EnvironmentValue("XRAY_AGENT_CLI");
     settings.config.executable = cli.empty() ? std::string("claude") : cli;
+#if defined(_WIN32)
+    settings.refusal = "unsupported_platform";   // the runner is a stub on Windows: say that, not "not found"
+    return settings;
+#endif
     if (!IsCliToken(settings.config.model))
         settings.refusal = "invalid_model";
     else if (!IsCliToken(settings.config.executable))
