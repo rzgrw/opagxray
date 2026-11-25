@@ -14,8 +14,10 @@ wraps simulation_board:get_squad_target (sim_board.script), which stock generic_
 smart passes stock's own keep-target check; every other call goes to the stock function
 unchanged. When the objective's smart is missing or refused, the wrapper reports blocked and falls
 back to the squad's assigned smart; when the smart it would answer fails stock's keep-target check,
-it reports blocked and answers nil (blocked events: at most one per objective revision). A hold, or
-a fallback, with no assigned smart gets nil with no event. After a nil answer stock's no-target path
+it reports blocked and answers nil (blocked events: at most one per objective revision). Two cases
+get nil without an event of their own: a hold whose squad has no assigned smart (no event at all), and
+a fallback after a blocked objective when the squad has no assigned smart (the event for the
+objective's site was already sent; no second one follows). After a nil answer stock's no-target path
 locks the squad in place until a new revision. The adapter never sets
 scripted_target, so stock population counts, tasks and reach rules see these squads as ordinary
 simulation squads. Squad state it writes: a one-time reset (current_action, __lock) when a new
@@ -163,12 +165,14 @@ local function precondition(smart, squad)
 	return ok and result == true
 end
 
--- False only when stock se_smart_terrain:target_precondition(squad) (smart_terrain.script) is false
--- for certain, checked without calling it: a disabled smart (stock disables a smart it cannot use and
--- drops it from simulation), respawn_only_smart, a full smart (population >= max_population), a smart
--- with no props, or props that name the squad's faction with a non-positive weight while props.all is
--- not positive. Anything it cannot decide (an odd value type) is left to the precondition itself, so a
--- site list filtered with it equals the list the precondition alone gives.
+-- False when the smart cannot be a useful target, checked without calling stock
+-- se_smart_terrain:target_precondition(squad) (smart_terrain.script). A disabled smart: target_precondition
+-- does not check `disabled`, but stock's evaluate_prior scores a disabled smart 0, so stock never picks it.
+-- Otherwise only where target_precondition is false for certain: respawn_only_smart, a full smart
+-- (population >= max_population), a smart with no props, or props that name the squad's faction with a
+-- non-positive weight while props.all is not positive. Anything it cannot decide (an odd value type) is
+-- left to the precondition itself, so apart from disabled smarts a site list filtered with it equals the
+-- list the precondition alone gives.
 local function may_accept(smart, entry, squad)
 	if smart.disabled or smart.respawn_only_smart == true then
 		return false
@@ -729,8 +733,9 @@ local function tick(now)
 				-- even at an equal revision, with fresh once-per-revision state.
 				if not (known and known.owner == owner and known.rev == revision) then
 					local objective = {owner = owner, rev = revision, verb = verb, site = site}
-					-- arrived is reported only for a squad that travels under this revision: never for a
-					-- stay or a hold, nor when the squad already stays at the site.
+					-- arrived is never reported for a stay or a hold, nor when the squad already stays at the
+					-- site by stock's action state (current_action == 1, stays_at) when the revision arrives;
+					-- a squad at its smart with another action state can still report it without travel.
 					local squad = SIMBOARD.squads[id]
 					objective.no_arrival = verb == "stay" or is_hold(objective) or
 						(squad ~= nil and stays_at(squad, site))

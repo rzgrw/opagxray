@@ -186,7 +186,7 @@ The bridge lets a script or agent run, control and screenshot the game. Protocol
 | `-agent_bridge_port <n>` | Windows: TCP port on 127.0.0.1; `0` or absent lets the OS pick. The bound port goes to `<appdata>/agent_bridge.port` |
 | `-agent_background` | Unattended instance: no focus, off-screen, windowed, no audio, no pause on focus loss, no error dialogs |
 | `-agent_sound` | With `-agent_background`: open the audio device anyway (silence it with `snd_volume_eff 0.` / `snd_volume_music 0.` in `user.ltx`); needed for long CoC sessions |
-| `-xrsim_freeplay recorded\|live` | Experimental, CoC runtime with the adapter installed by `tools/freeplay_runtime.py`: one AI decision owner per freeplay squad, mutant pack and squadless NPC. `recorded` takes decisions only from `ai.freeplay.decide`; `live` wakes owners through the provider below and **has not been exercised yet**. Status: [PLAN_STATUS](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21) |
+| `-xrsim_freeplay recorded\|live` | Experimental, CoC runtime with the adapter installed by `tools/freeplay_runtime.py`: one AI decision owner per freeplay squad, mutant pack and squadless NPC. `recorded` takes decisions only from `ai.freeplay.decide`; `live` wakes owners through the provider below (`claude_cli` on a Claude subscription or `anthropic` with an API key); one 15-minute `claude_cli` run on macOS is its only live evidence. Status: [PLAN_STATUS](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21) |
 
 `agentctl.py` accepts a Unix socket path, `tcp:HOST:PORT`, an `agent_bridge.port` file, or an appdata directory containing one. `--wait S` retries until the instance is up.
 
