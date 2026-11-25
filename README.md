@@ -166,6 +166,16 @@ If something goes wrong, check `build\runtime\coc\appdata\logs\` and attach that
 
 To read CoC scripts or configs: `python -I tools/xrdb_unpack.py <coc>/database/config/scripts.db <empty-dir> [scripts/]`.
 
+### 5. Play with AI on your Claude subscription (experimental, macOS/Linux)
+
+Freeplay AI gives every stalker squad, mutant pack and squadless NPC one decision owner; in `live` mode a Claude model picks where each squad goes next. It can run on your Claude subscription through Claude Code, with no API key:
+
+1. Install [Claude Code](https://docs.claude.com/en/docs/claude-code) and sign in once by running `claude` in a terminal (`claude auth status` should report `"loggedIn": true`).
+2. From the repository root: `python3 tools/freeplay_play.py` (runtime `build/runtime/play` by default; `--runtime <dir>` for another staged folder, `--dry-run` to see what it would do).
+3. The game starts and shows `AI freeplay is on: Claude subscription via Claude Code, model sonnet, up to 6 decisions per minute`. If something is missing, the launcher or the game says what to do in one sentence.
+
+What to expect: each decision is one Claude Code call (a few seconds each) and spends your subscription usage. At the default 6 decisions per minute, with one call at a time, the Zone changes slowly: a few hundred squads share those calls, so any one squad is reconsidered every few tens of minutes; raise it with `--calls-per-minute N` (or lower it to spend less). The launcher installs the freeplay adapter and the story-theme fix into the runtime and starts the game from inside it. It is experimental, and decided destinations are not saved yet: after a load, squads start over from stock targets.
+
 ## Agent Bridge
 
 The bridge lets a script or agent run, control and screenshot the game. Protocol: [agent-bridge design](docs/superpowers/specs/2026-07-04-agent-bridge-design.md).
@@ -236,11 +246,27 @@ export XRAY_AGENT_TIMEOUT_MS=5000
 
 Missing curl, keys or network return coast values such as `network_adapter_not_linked` or `missing_api_key`; they are never fatal.
 
-Experimental freeplay live mode (`-xrsim_freeplay live`, see the options table) uses the same `XRAY_AGENT_PROVIDER`, `XRAY_AGENT_MODEL` and `ANTHROPIC_API_KEY` (or `XRAY_AGENT_API_KEY`). It needs `XRAY_AGENT_PROVIDER=anthropic` (the default when unset), an API key and an explicit `XRAY_AGENT_MODEL`, and refuses to start otherwise, in this order: `provider_disabled`, `missing_api_key`, `missing_model` (the source default model ID is not used), `transport_unavailable`. Set `XRAY_AGENT_TIMEOUT_MS` deliberately for a live run. It has not been run with a model yet; only recorded mode has live evidence.
+Experimental freeplay live mode (`-xrsim_freeplay live`, see the options table; [one-command start](#5-play-with-ai-on-your-claude-subscription-experimental-macoslinux)) has two providers. Reference:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `XRAY_AGENT_PROVIDER` | `claude_cli` or `anthropic` | unset: `anthropic` when an API key is set, otherwise `claude_cli` |
+| `XRAY_AGENT_MODEL` | model ID or alias | `claude_cli`: `sonnet`; `anthropic`: required |
+| `XRAY_AGENT_CLI` | Claude Code executable for `claude_cli` (one word: a bare name on `PATH` or an absolute path) | `claude` |
+| `XRAY_AGENT_TIMEOUT_MS` | per-call timeout (`claude_cli`: 1000–600000) | `claude_cli` 60000 |
+| `XRAY_FREEPLAY_MAX_IN_FLIGHT` | concurrent decisions, 1–8 | `claude_cli` 1, `anthropic` 2 |
+| `XRAY_FREEPLAY_CALLS_PER_MINUTE` | provider calls in any rolling 60 s of game time, 0 = no cap | `claude_cli` 6, `anthropic` 0 |
+| `XRAY_FREEPLAY_RECONSIDER_MS` | how often an idle owner is asked again, 60000–86400000 | 600000 |
+| `XRAY_FREEPLAY_MIN_WAKE_MS` | minimum time between two decisions of one owner, 5000–3600000 | 45000 |
+
+- **`claude_cli` (experimental)** runs the Claude Code CLI found on `PATH` (or `XRAY_AGENT_CLI`) in headless mode, `claude -p --model <m> --tools "" --no-session-persistence --strict-mcp-config --setting-sources "" --system-prompt ...`, with the login of the environment the game was launched from (a subscription login works; API key variables are not passed to it). Each decision is one CLI call, at most 6 per minute by default. It runs on a worker thread from the system temp directory, never through a shell; a call that hangs is killed after the timeout. Refusals, in order: `invalid_model`, `invalid_cli`, `cli_unavailable`, `invalid_setting:<NAME>` (no `missing_model`: the default is `sonnet`). macOS/Linux only.
+- **`anthropic`** uses `ANTHROPIC_API_KEY` (or `XRAY_AGENT_API_KEY`) and needs an explicit `XRAY_AGENT_MODEL`; refusals in order: `missing_api_key`, `missing_model` (the source default model ID is not used), `transport_unavailable`, `invalid_setting:<NAME>`. Set `XRAY_AGENT_TIMEOUT_MS` deliberately for a live run.
+
+Any other `XRAY_AGENT_PROVIDER` value refuses with `provider_disabled`. The `ai.freeplay.mode` reply shows the resolved provider, model and settings, and `last_failure=<reason>` while the provider backs off after a failure; the adapter turns both into one on-screen line.
 
 ## Tests and Verification
 
-- Standalone xrSim tests (any platform, no engine build): `cmake -S tools/xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-xrsim`, then run `xrSimAuthoritySpineTests`, `xrSimWorldStateTests` and (on the freeplay branch) `xrSimFreeplayTests`; `tools/xrsim_standalone/build_and_test.sh` does all of it on macOS/Linux. Freeplay tool tests: `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe`.
+- Standalone xrSim tests (any platform, no engine build): `cmake -S tools/xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-xrsim`, then run `xrSimAuthoritySpineTests`, `xrSimWorldStateTests` and (on the freeplay branch) `xrSimFreeplayTests`; `tools/xrsim_standalone/build_and_test.sh` does all of it on macOS/Linux. Freeplay tool tests: `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe tools.tests.test_freeplay_play tools.tests.test_freeplay_adapter_messages` (the adapter message test needs `luajit`).
 - CMake focused targets (`EXCLUDE_FROM_ALL`, build by name): `xrSimWorldStateTests`, `xrSimAuthoritySpineTests`, `xrUIShaderCacheTests`, `xrFrameTimeCollectorTests`, `xrFrameTimeCollectorBoundaryTests`, `xrFrameTimeSessionTests`, `xrMainMenuReloadTests`.
 - Python tooling: `py -m unittest tools.tests.test_agentctl`. Some other `tools/tests` cases exercise macOS-only behaviour (AF_UNIX, Mach-O) and fail on Windows.
 - Regression gate before merging engine changes: a private-save bridge scenario covering movement, save/load, UI and quit, run in background instances.
