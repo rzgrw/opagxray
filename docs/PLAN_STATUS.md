@@ -1,4 +1,8 @@
-# Plan status — 2026-11-08
+# Plan status — 2026-11-25
+
+## main promotion — 2026-11-25
+
+At the user's explicit request `main` was fast-forwarded from `20a922587` to `dev` at `82b4be2b5` plus this record, **without the full recorded gate**. What the promotion adds is the freeplay population AI ([below](#freeplay-population-ai--2026-11-21)) and the README refresh. Evidence at promotion, all on macOS arm64: the three `xrSimCore` test programs exit 0 and the 176 Python tool tests pass on `dev` (rerun 2026-11-25 at `aad3d6b7c`; the later commits are README only); the CMake engine build passed and the no-flag regression gate (move, look, save, load, inventory, menu, quit) passed with 0 failures on the build from `ef6f041e9`, after which only the flag-gated adapter, tools and docs changed. Not verified: the Windows MSBuild build of the new `xrSim` sources and of the background-mode engine changes (postponed by the user on 2026-11-25), so `main` may not build on Windows until that is checked; every open item of the freeplay section; and the items the 2026-11-08 promotion left for the next gate (below), which are still not verified in game. Not part of this promotion: the Claude Code CLI provider and its first live-model run, which are on `feat/freeplay-claude-cli` under review.
 
 ## main promotion — 2026-11-08
 
