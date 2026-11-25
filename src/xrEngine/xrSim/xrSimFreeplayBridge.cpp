@@ -3,11 +3,13 @@
 #include "xrSim/xrSimActorProvider.h"
 #include "xrSim/xrSimAgentProvider.h"
 #include "xrSim/xrSimAnthropicTransport.h"
+#include "xrSim/xrSimClaudeCliProvider.h"
 #include "xrSim/xrSimFreeplay.h"
 #include "xrSim/xrSimFreeplayDecision.h"
 #include "xrSim/xrSimFreeplayScheduler.h"
 
 #include <cstdlib>
+#include <deque>
 #include <map>
 #include <set>
 #include <sstream>
@@ -43,6 +45,28 @@ struct PendingRequest
     StoredObservation stored;
 };
 
+// Read from the environment once, when the mode switches to live.
+struct LiveSettings
+{
+    std::string provider = "anthropic";
+    std::string model = "-";
+    uint64_t maxInFlight = 2;
+    uint64_t callsPerMinute = 0;   // 0: no cap
+    uint64_t reconsiderMs = 600000;
+    uint64_t minWakeMs = 45000;
+    ClaudeCliConfig cli;   // the claude_cli provider's executable, model and timeout
+};
+
+constexpr uint64_t kCallWindowMs = 60000;
+constexpr uint64_t kBlockedMemoryMs = 600000;
+
+// The site an owner's last blocked event named. While remembered, a decision for that site is rejected.
+struct BlockedSite
+{
+    std::string site;
+    uint64_t atMs = 0;
+};
+
 struct FreeplayRuntime
 {
     FreeplayMode mode = FreeplayMode::Off;
@@ -57,6 +81,10 @@ struct FreeplayRuntime
     std::set<uint64_t> knownOwners;               // owners that already had their spawn wake
     std::map<uint64_t, uint32_t> appliedRevision; // objective revision of the last apply line per owner
     std::map<uint64_t, FreeplayObjective> previousObjective; // in force before the owner's last committed decision
+    LiveSettings live;
+    std::map<uint64_t, BlockedSite> blocked;      // until kBlockedMemoryMs, an arrived event, retire or begin
+    std::string lastFailure;                      // reason of the latest provider failure (one token)
+    std::deque<uint64_t> submissions;             // tick time of each live provider submission in the call window
 };
 
 FreeplayRuntime g_freeplay;
@@ -140,7 +168,88 @@ std::string BindingText(const FreeplayOwner& owner)
     return std::string(owner.binding == FreeplayBinding::Group ? "group:" : "npc:") + std::to_string(owner.bindingId);
 }
 
-AgentProviderConfig LiveConfig() { return LoadAgentProviderConfigFromEnvironment(); }
+// The provider live mode uses: XRAY_AGENT_PROVIDER when set; otherwise anthropic when an API key is set
+// (ANTHROPIC_API_KEY or XRAY_AGENT_API_KEY), else claude_cli, the player's own Claude Code login.
+AgentProviderConfig LiveConfig()
+{
+    AgentProviderConfig config = LoadAgentProviderConfigFromEnvironment();
+    const char* provider = std::getenv("XRAY_AGENT_PROVIDER");
+    if (provider == nullptr || *provider == '\0')
+        config.provider = config.apiKey.empty() ? "claude_cli" : "anthropic";
+    return config;
+}
+
+// A provider failure as one token for the mode reply: the reason only, never the error detail.
+std::string FailureToken(const std::string& reason)
+{
+    std::string token = reason.empty() ? std::string("provider_error") : reason.substr(0, 64);
+    for (char& c : token)
+    {
+        const bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ||
+            c == '.' || c == ':' || c == '-';
+        if (!allowed)
+            c = '_';
+    }
+    return token;
+}
+
+std::string EnvironmentValue(const char* name)
+{
+    const char* value = std::getenv(name);
+    return value != nullptr ? std::string(value) : std::string();
+}
+
+// A model or executable handed to the CLI: one token of [A-Za-z0-9._/@:+-], never an option.
+bool IsCliToken(const std::string& value)
+{
+    if (value.empty() || value[0] == '-')
+        return false;
+    for (const char c : value)
+    {
+        const bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' ||
+            c == '_' || c == '/' || c == '@' || c == ':' || c == '+' || c == '-';
+        if (!allowed)
+            return false;
+    }
+    return true;
+}
+
+// The claude_cli provider's settings, read from the environment directly: LoadAgentProviderConfigFromEnvironment
+// knows neither XRAY_AGENT_CLI nor this provider's 60000 ms default timeout.
+struct CliSettings
+{
+    ClaudeCliConfig config;
+    std::string refusal;   // empty when the settings are usable
+};
+
+CliSettings LoadCliSettings()
+{
+    CliSettings settings;
+    const std::string model = EnvironmentValue("XRAY_AGENT_MODEL");
+    settings.config.model = model.empty() ? std::string("sonnet") : model;   // the CLI's own alias
+    const std::string cli = EnvironmentValue("XRAY_AGENT_CLI");
+    settings.config.executable = cli.empty() ? std::string("claude") : cli;
+#if defined(_WIN32)
+    settings.refusal = "unsupported_platform";   // the runner is a stub on Windows: say that, not "not found"
+    return settings;
+#endif
+    if (!IsCliToken(settings.config.model))
+        settings.refusal = "invalid_model";
+    else if (!IsCliToken(settings.config.executable))
+        settings.refusal = "invalid_cli";
+    else if (!IsCliExecutableAvailable(settings.config.executable))
+        settings.refusal = "cli_unavailable";
+    const std::string timeout = EnvironmentValue("XRAY_AGENT_TIMEOUT_MS");
+    if (settings.refusal.empty() && !timeout.empty())
+    {
+        uint64_t timeoutMs = 0;
+        if (!ParseU64(timeout, ~0ull, timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000)
+            settings.refusal = "invalid_setting:XRAY_AGENT_TIMEOUT_MS";
+        else
+            settings.config.timeoutMs = static_cast<uint32_t>(timeoutMs);
+    }
+    return settings;
+}
 
 // Empty when live mode may start. The model must be named in XRAY_AGENT_MODEL: the provider's built-in
 // default model ID is a historical value that needs verification before any live use.
@@ -149,6 +258,8 @@ std::string LiveModeRefusal()
     if (g_freeplayTestProvider)
         return std::string();
     const AgentProviderConfig config = LiveConfig();
+    if (config.enabled && config.provider == "claude_cli")
+        return LoadCliSettings().refusal;
     if (!config.enabled || config.provider != "anthropic")
         return "provider_disabled";
     if (config.apiKey.empty())
@@ -161,10 +272,87 @@ std::string LiveModeRefusal()
     return std::string();
 }
 
+// One numeric setting: unset keeps the default; anything else must be a number in [minValue, maxValue].
+bool ReadSetting(const char* name, uint64_t minValue, uint64_t maxValue, uint64_t& value)
+{
+    const std::string text = EnvironmentValue(name);
+    if (text.empty())
+        return true;
+    uint64_t parsed = 0;
+    if (!ParseU64(text, ~0ull, parsed) || parsed < minValue || parsed > maxValue)
+        return false;
+    value = parsed;
+    return true;
+}
+
+// Empty when the scheduler settings are usable; they are then in settings.
+std::string LoadLiveSettings(LiveSettings& settings)
+{
+    const AgentProviderConfig config = LiveConfig();
+    const bool cli = config.provider == "claude_cli";
+    settings = LiveSettings();
+    settings.provider = config.provider;
+    const std::string model = EnvironmentValue("XRAY_AGENT_MODEL");
+    settings.model = model.empty() ? std::string("-") : model;
+    if (cli)
+    {
+        settings.cli = LoadCliSettings().config;
+        settings.model = settings.cli.model;
+    }
+    settings.maxInFlight = cli ? 1 : 2;
+    settings.callsPerMinute = cli ? 6 : 0;
+    if (!ReadSetting("XRAY_FREEPLAY_MAX_IN_FLIGHT", 1, 8, settings.maxInFlight))
+        return "invalid_setting:XRAY_FREEPLAY_MAX_IN_FLIGHT";
+    if (!ReadSetting("XRAY_FREEPLAY_CALLS_PER_MINUTE", 0, 600, settings.callsPerMinute))
+        return "invalid_setting:XRAY_FREEPLAY_CALLS_PER_MINUTE";
+    if (!ReadSetting("XRAY_FREEPLAY_RECONSIDER_MS", 60000, 86400000, settings.reconsiderMs))
+        return "invalid_setting:XRAY_FREEPLAY_RECONSIDER_MS";
+    if (!ReadSetting("XRAY_FREEPLAY_MIN_WAKE_MS", 5000, 3600000, settings.minWakeMs))
+        return "invalid_setting:XRAY_FREEPLAY_MIN_WAKE_MS";
+    return std::string();
+}
+
+FreeplaySchedulerConfig SchedulerConfigFor(const LiveSettings& settings)
+{
+    FreeplaySchedulerConfig config;
+    config.maxInFlight = static_cast<uint32_t>(settings.maxInFlight);
+    config.reconsiderIntervalMs = static_cast<uint32_t>(settings.reconsiderMs);
+    config.minWakeIntervalMs = static_cast<uint32_t>(settings.minWakeMs);
+    return config;
+}
+
+std::string LiveSettingsText(const LiveSettings& settings)
+{
+    return " provider=" + settings.provider + " model=" + settings.model +
+        " max_in_flight=" + std::to_string(settings.maxInFlight) +
+        " calls_per_minute=" + std::to_string(settings.callsPerMinute) +
+        " reconsider_ms=" + std::to_string(settings.reconsiderMs) + " min_wake_ms=" + std::to_string(settings.minWakeMs);
+}
+
+// How many owners the tick may hand out under the call budget: submissions in the last 60 s of tick time
+// and hand-outs still awaiting their observation (each will submit) both count. Recorded mode has no cap.
+size_t CallBudget(uint64_t nowMs)
+{
+    if (g_freeplay.mode != FreeplayMode::Live || g_freeplay.live.callsPerMinute == 0)
+        return SIZE_MAX;
+    std::deque<uint64_t>& submissions = g_freeplay.submissions;
+    while (!submissions.empty() && Elapsed(submissions.front(), nowMs) >= kCallWindowMs)
+        submissions.pop_front();
+    const uint64_t used = submissions.size() + g_freeplay.handedOut.size();
+    return used >= g_freeplay.live.callsPerMinute ? 0 : static_cast<size_t>(g_freeplay.live.callsPerMinute - used);
+}
+
+std::unique_ptr<IActorIntentProvider> CreateFreeplayProvider()
+{
+    if (g_freeplay.live.provider == "claude_cli")
+        return std::make_unique<ClaudeCliActorIntentProvider>(g_freeplay.live.cli, CreateProcessCliRunner());
+    return CreateLiveActorIntentProvider(LiveConfig());
+}
+
 AsyncActorProviderQueue& EnsureFreeplayQueue()
 {
     if (!g_freeplayQueue)
-        g_freeplayQueue = std::make_unique<AsyncActorProviderQueue>(CreateLiveActorIntentProvider(LiveConfig()));
+        g_freeplayQueue = std::make_unique<AsyncActorProviderQueue>(CreateFreeplayProvider());
     return *g_freeplayQueue;
 }
 
@@ -181,6 +369,20 @@ FreeplayLedgerEntry DecisionEntry(uint64_t ownerId, const StoredObservation& sto
     return entry;
 }
 
+// The owner's remembered blocked site, or nullptr once forgotten or expired.
+const BlockedSite* ActiveBlockedSite(uint64_t ownerId)
+{
+    const auto found = g_freeplay.blocked.find(ownerId);
+    if (found == g_freeplay.blocked.end())
+        return nullptr;
+    if (Elapsed(found->second.atMs, g_freeplay.nowMs) >= kBlockedMemoryMs)
+    {
+        g_freeplay.blocked.erase(found);
+        return nullptr;
+    }
+    return &found->second;
+}
+
 void StoreMemories(uint64_t ownerId, const FreeplayVerdict& verdict)
 {
     // Memories are single tokens from the intent parser; AddMemory drops anything else.
@@ -190,13 +392,18 @@ void StoreMemories(uint64_t ownerId, const FreeplayVerdict& verdict)
 
 // Commits a verdict and returns the ledger verdict: accepted, kept, or why nothing changed. A verdict
 // equal to the owner's current objective (same verb and site) is kept: no new revision, so the adapter
-// sees no new objective, and memories are still stored.
+// sees no new objective, and memories are still stored. A verdict for the owner's recently blocked site is
+// recently_blocked: stock has just refused that site, so choosing it again would only restart the
+// stay/move -> blocked -> revert -> wake loop.
 std::string ApplyVerdict(uint64_t ownerId, const FreeplayVerdict& verdict, FreeplayObjectiveSource source)
 {
     if (!verdict.ok)
         return verdict.reason;
     if (verdict.keep)
         return "kept";
+    const BlockedSite* blocked = ActiveBlockedSite(ownerId);
+    if (blocked != nullptr && blocked->site == verdict.site)
+        return "recently_blocked";
     const FreeplayOwner* owner = g_freeplay.population.FindOwner(ownerId);
     const FreeplayObjective previous = owner != nullptr ? owner->objective : FreeplayObjective();
     if (owner != nullptr && previous.verb == verdict.verb && previous.site == verdict.site)
@@ -241,10 +448,12 @@ void SettleReply(const PendingRequest& request, const ActorWakePollResult& polle
             entry.verdict = polled.reason;
         else
             entry.verdict = result.error.empty() ? result.coastReason : result.coastReason + ":" + result.error;
+        g_freeplay.lastFailure = FailureToken(polled.ok ? result.coastReason : polled.reason);
         g_freeplay.ledger.Append(entry);
         g_freeplay.scheduler.OnDecision(request.ownerId, true, g_freeplay.nowMs);
         return;
     }
+    g_freeplay.lastFailure.clear();   // the provider answered
     if (!result.ok)
     {
         entry.verdict = "malformed:" + (result.error.empty() ? std::string("provider_error") : result.error);
@@ -305,6 +514,7 @@ void ForgetRetiredOwners()
     EraseRetired(g_freeplay.observations);
     EraseRetired(g_freeplay.appliedRevision);
     EraseRetired(g_freeplay.previousObjective);
+    EraseRetired(g_freeplay.blocked);
     for (auto it = g_freeplay.knownOwners.begin(); it != g_freeplay.knownOwners.end();)
     {
         if (g_freeplay.population.FindOwner(*it) == nullptr)
@@ -322,21 +532,38 @@ std::string Mode(const std::string& payload, bool& ok)
     if (!tokens.empty())
     {
         const std::string& requested = tokens[0];
-        if (requested == "off")
-            g_freeplay.mode = FreeplayMode::Off;
-        else if (requested == "recorded")
-            g_freeplay.mode = FreeplayMode::Recorded;
+        if (requested == "off" || requested == "recorded")
+        {
+            g_freeplay.mode = requested == "off" ? FreeplayMode::Off : FreeplayMode::Recorded;
+            g_freeplay.scheduler.SetConfig(FreeplaySchedulerConfig());
+        }
         else if (requested == "live")
         {
-            const std::string refusal = LiveModeRefusal();
-            if (!refusal.empty())
-                return Fail(ok, refusal);
-            g_freeplay.mode = FreeplayMode::Live;
+            if (g_freeplay.mode != FreeplayMode::Live)
+            {
+                std::string refusal = LiveModeRefusal();
+                LiveSettings settings;
+                if (refusal.empty())
+                    refusal = LoadLiveSettings(settings);
+                if (!refusal.empty())
+                    return Fail(ok, refusal);
+                g_freeplay.live = settings;
+                g_freeplay.scheduler.SetConfig(SchedulerConfigFor(settings));
+                g_freeplay.mode = FreeplayMode::Live;
+            }
         }
         else
             return Fail(ok, "usage: ai.freeplay.mode [off|recorded|live]");
     }
-    return Succeed(ok, std::string("mode=") + ModeName(g_freeplay.mode));
+    std::string reply = std::string("mode=") + ModeName(g_freeplay.mode);
+    if (g_freeplay.mode == FreeplayMode::Live)
+    {
+        reply += LiveSettingsText(g_freeplay.live);
+        // While the provider backs off, the reason that started it: the adapter turns it into a message.
+        if (!g_freeplay.lastFailure.empty() && g_freeplay.scheduler.BackoffActive(g_freeplay.nowMs))
+            reply += " last_failure=" + g_freeplay.lastFailure;
+    }
+    return Succeed(ok, reply);
 }
 
 std::string Begin(const std::string& payload, bool& ok)
@@ -355,6 +582,7 @@ std::string Begin(const std::string& payload, bool& ok)
     g_freeplay.knownOwners.clear();
     g_freeplay.appliedRevision.clear();
     g_freeplay.previousObjective.clear();
+    g_freeplay.blocked.clear();
     return Succeed(ok, "epoch=" + std::to_string(epoch));
 }
 
@@ -384,6 +612,7 @@ std::string Retire(const std::string& payload, bool& ok)
     g_freeplay.observations.erase(ownerId);
     g_freeplay.appliedRevision.erase(ownerId);
     g_freeplay.previousObjective.erase(ownerId);
+    g_freeplay.blocked.erase(ownerId);
     g_freeplay.knownOwners.erase(ownerId);
     for (auto it = g_freeplay.pending.begin(); it != g_freeplay.pending.end();)
     {
@@ -425,7 +654,13 @@ std::string Event(const std::string& payload, bool& ok)
     const FreeplayOwner* owner = g_freeplay.population.FindByBinding(FreeplayBinding::Group, groupId);
     if (owner == nullptr)
         return Fail(ok, "unknown_group");
-    g_freeplay.scheduler.RequestWake(owner->ownerId, tokens[1], g_freeplay.nowMs);
+    const uint64_t ownerId = owner->ownerId;
+    const bool blocked = tokens[1] == "blocked";
+    // A repeated report of the site already remembered as blocked wakes nobody, so it cannot restart the loop.
+    const BlockedSite* remembered = blocked ? ActiveBlockedSite(ownerId) : nullptr;
+    const bool repeated = remembered != nullptr && remembered->site == tokens[2];
+    if (!repeated)
+        g_freeplay.scheduler.RequestWake(ownerId, tokens[1], g_freeplay.nowMs);
     // Sightings are frequent; they show up only as the wakeReason of the owner's next decision.
     if (tokens[1] == "sighting")
         return Succeed(ok, "queued");
@@ -439,8 +674,14 @@ std::string Event(const std::string& payload, bool& ok)
     entry.verdict = "event";
     entry.site = tokens[2];
     g_freeplay.ledger.Append(entry);
-    if (tokens[1] == "blocked")
-        RevertBlockedObjective(owner->ownerId, tokens[2]);
+    if (blocked)
+    {
+        if (!repeated)
+            g_freeplay.blocked[ownerId] = BlockedSite{tokens[2], g_freeplay.nowMs};
+        RevertBlockedObjective(ownerId, tokens[2]);
+    }
+    else if (tokens[1] == "arrived")
+        g_freeplay.blocked.erase(ownerId);
     return Succeed(ok, "queued");
 }
 
@@ -488,16 +729,20 @@ std::string Observe(const std::string& payload, bool& ok)
     }
 
     const FreeplayOwner* owner = g_freeplay.population.FindOwner(ownerId);
-    const ActorWakeContext context = BuildFreeplayWake(*owner, stored.observation, stored.reasons);
+    const BlockedSite* blocked = ActiveBlockedSite(ownerId);
+    const ActorWakeContext context =
+        BuildFreeplayWake(*owner, stored.observation, stored.reasons, blocked != nullptr ? blocked->site : std::string());
     const ActorWakeSubmitResult submitted = EnsureFreeplayQueue().Submit(context);
     if (!submitted.ok)
     {
         FreeplayLedgerEntry entry = DecisionEntry(ownerId, stored, "hold");
         entry.verdict = submitted.reason;
+        g_freeplay.lastFailure = FailureToken(submitted.reason);
         g_freeplay.ledger.Append(entry);
         g_freeplay.scheduler.OnDecision(ownerId, true, g_freeplay.nowMs);
         return Fail(ok, submitted.reason);
     }
+    g_freeplay.submissions.push_back(g_freeplay.nowMs);
     PendingRequest request;
     request.ownerId = ownerId;
     request.epoch = stored.observation.epoch;
@@ -579,7 +824,7 @@ std::string Tick(const std::string& payload, bool& ok)
     if (g_freeplay.mode == FreeplayMode::Off)
         return Succeed(ok, out);
 
-    for (const uint64_t ownerId : scheduler.TakeObservationRequests(population, nowMs))
+    for (const uint64_t ownerId : scheduler.TakeObservationRequests(population, nowMs, CallBudget(nowMs)))
     {
         const FreeplayOwner* owner = population.FindOwner(ownerId);
         HandedOutWake wake;

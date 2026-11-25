@@ -31,9 +31,12 @@ class FreeplayScheduler
 public:
     explicit FreeplayScheduler(const FreeplaySchedulerConfig& config = {});
     void Reset();
+    void SetConfig(const FreeplaySchedulerConfig& config);   // owners and their state are kept
     void Forget(uint64_t ownerId);
     void RequestWake(uint64_t ownerId, const std::string& reason, uint64_t nowMs);
-    std::vector<uint64_t> TakeObservationRequests(const FreeplayPopulation& population, uint64_t nowMs);
+    // Hands out at most maxNew queued owners (the call budget); the rest keep their place.
+    std::vector<uint64_t> TakeObservationRequests(
+        const FreeplayPopulation& population, uint64_t nowMs, size_t maxNew = SIZE_MAX);
     std::vector<uint64_t> TakeTimedOutObservations(uint64_t nowMs);   // AwaitingObservation older than the timeout -> Idle
     void OnObservation(uint64_t ownerId, uint64_t nowMs);
     void OnDecision(uint64_t ownerId, bool providerFailed, uint64_t nowMs);

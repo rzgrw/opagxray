@@ -14,8 +14,10 @@ wraps simulation_board:get_squad_target (sim_board.script), which stock generic_
 smart passes stock's own keep-target check; every other call goes to the stock function
 unchanged. When the objective's smart is missing or refused, the wrapper reports blocked and falls
 back to the squad's assigned smart; when the smart it would answer fails stock's keep-target check,
-it reports blocked and answers nil (blocked events: at most one per objective revision). A hold, or
-a fallback, with no assigned smart gets nil with no event. After a nil answer stock's no-target path
+it reports blocked and answers nil (blocked events: at most one per objective revision). Two cases
+get nil without an event of their own: a hold whose squad has no assigned smart (no event at all), and
+a fallback after a blocked objective when the squad has no assigned smart (the event for the
+objective's site was already sent; no second one follows). After a nil answer stock's no-target path
 locks the squad in place until a new revision. The adapter never sets
 scripted_target, so stock population counts, tasks and reach rules see these squads as ordinary
 simulation squads. Squad state it writes: a one-time reset (current_action, __lock) when a new
@@ -24,6 +26,8 @@ mid-travel, and on deactivation the clearing of __lock on the squads its nil ans
 Deactivation restores the stock function; squads finish their current travel and return to stock
 selection. It does not undo targets stock assigned while the adapter was active.
 Companions, hostages, scripted and random-target squads are reported and left alone.
+The player sees one on-screen line when the mode starts (provider, model, decision budget) or is refused
+(what to do), and one per distinct provider failure the engine reports (last_failure in the mode reply).
 --]]
 
 local TICK_MS = 1000
@@ -68,6 +72,7 @@ local wrapper_fn           -- the installed wrapper
 local held_locks = {}      -- [group id] = true when the wrapper answered nil (stock then set __lock)
 local sight_pairs = {}     -- [observer id] = {[other id] = {armed, fired}} for damped sighting events
 local warned = {}          -- [key] = true once a warning was logged
+local failures_shown = {}  -- [last_failure value] = true once its message was shown this session
 
 ------------------------------------------------------------------------------------------------
 -- helpers
@@ -160,12 +165,14 @@ local function precondition(smart, squad)
 	return ok and result == true
 end
 
--- False only when stock se_smart_terrain:target_precondition(squad) (smart_terrain.script) is false
--- for certain, checked without calling it: a disabled smart (stock disables a smart it cannot use and
--- drops it from simulation), respawn_only_smart, a full smart (population >= max_population), a smart
--- with no props, or props that name the squad's faction with a non-positive weight while props.all is
--- not positive. Anything it cannot decide (an odd value type) is left to the precondition itself, so a
--- site list filtered with it equals the list the precondition alone gives.
+-- False when the smart cannot be a useful target, checked without calling stock
+-- se_smart_terrain:target_precondition(squad) (smart_terrain.script). A disabled smart: target_precondition
+-- does not check `disabled`, but stock's evaluate_prior scores a disabled smart 0, so stock never picks it.
+-- Otherwise only where target_precondition is false for certain: respawn_only_smart, a full smart
+-- (population >= max_population), a smart with no props, or props that name the squad's faction with a
+-- non-positive weight while props.all is not positive. Anything it cannot decide (an odd value type) is
+-- left to the precondition itself, so apart from disabled smarts a site list filtered with it equals the
+-- list the precondition alone gives.
 local function may_accept(smart, entry, squad)
 	if smart.disabled or smart.respawn_only_smart == true then
 		return false
@@ -217,6 +224,78 @@ local function living_members(squad)
 		end
 	end
 	return members, species
+end
+
+------------------------------------------------------------------------------------------------
+-- messages for the player (global so the CoC namespace and tests can reach them; they read only their arguments)
+------------------------------------------------------------------------------------------------
+
+local PROVIDER_WORDS = {claude_cli = "Claude subscription via Claude Code", anthropic = "Anthropic API"}
+
+-- The on-screen line for an accepted mode, from the ai.freeplay.mode reply
+-- ("mode=live provider=<p> model=<m> max_in_flight=<n> calls_per_minute=<n> ...").
+function activation_message(reply)
+	local mode_name = string.match(reply or "", "^mode=(%S+)")
+	if mode_name ~= "live" then
+		return "AI freeplay is on in recorded mode (no model)"
+	end
+	local provider = string.match(reply, " provider=(%S+)") or "?"
+	local model = string.match(reply, " model=(%S+)") or "?"
+	local calls = tonumber(string.match(reply, " calls_per_minute=(%d+)") or "")
+	local budget = (calls == nil or calls == 0) and "no limit on decisions per minute" or
+		"up to " .. calls .. " decisions per minute"
+	return "AI freeplay is on: " .. (PROVIDER_WORDS[provider] or provider) .. ", model " .. model .. ", " .. budget
+end
+
+-- What to do when the engine refuses the mode, keyed by its reason.
+function refusal_message(reason)
+	reason = reason or ""
+	local name = string.match(reason, "^invalid_setting:(%S+)")
+	if name then
+		return "AI freeplay is off: the setting " .. name .. " has a value out of range. Fix it or unset it."
+	elseif reason == "cli_unavailable" then
+		return "AI freeplay is off: Claude Code was not found. Install it, sign in by running `claude`, then start the game again."
+	elseif reason == "missing_api_key" then
+		return "AI freeplay is off: XRAY_AGENT_PROVIDER is anthropic but no Anthropic API key is set. Set " ..
+			"ANTHROPIC_API_KEY, or unset XRAY_AGENT_PROVIDER to play on your Claude subscription, then start the game again."
+	elseif reason == "missing_model" then
+		return "AI freeplay is off: no model is set for the Anthropic API. Set XRAY_AGENT_MODEL to a model name, " ..
+			"then start the game again."
+	elseif reason == "unsupported_platform" then
+		return "AI freeplay is off: playing on the Claude subscription through Claude Code is not supported on this " ..
+			"system yet (macOS and Linux only)."
+	elseif reason == "invalid_model" then
+		return "AI freeplay is off: the model name (XRAY_AGENT_MODEL) must be one word."
+	elseif reason == "provider_disabled" then
+		return "AI freeplay is off: XRAY_AGENT_PROVIDER names no provider it knows (claude_cli or anthropic)."
+	elseif reason == "invalid_cli" then
+		return "AI freeplay is off: the Claude Code path (XRAY_AGENT_CLI) must be one word."
+	end
+	return "AI freeplay is off: " .. reason
+end
+
+-- What a provider failure means for the player; the Zone carries on and the engine retries.
+function failure_message(reason)
+	if reason == "cli_exit" then
+		return "Claude Code could not answer. Run `claude` in a terminal to check that you are signed in."
+	elseif reason == "cli_timeout" then
+		return "Claude Code is not answering in time. The Zone carries on; it will try again."
+	elseif reason == "cli_unavailable" then
+		return "Claude Code was not found. Install it and sign in by running `claude`."
+	elseif reason == "transport_error" or reason == "http_status" then
+		return "The Anthropic API could not be reached. The Zone carries on; it will try again."
+	end
+	return "The AI provider failed (" .. tostring(reason) .. "). The Zone carries on; it will try again."
+end
+
+-- The message for a new last_failure in a mode reply, once per distinct value per session; nil otherwise.
+function failure_notice(reply, shown)
+	local reason = string.match(reply or "", " last_failure=(%S+)")
+	if not reason or shown[reason] then
+		return nil
+	end
+	shown[reason] = true
+	return failure_message(reason), reason
 end
 
 ------------------------------------------------------------------------------------------------
@@ -659,8 +738,9 @@ local function tick(now)
 				-- even at an equal revision, with fresh once-per-revision state.
 				if not (known and known.owner == owner and known.rev == revision) then
 					local objective = {owner = owner, rev = revision, verb = verb, site = site}
-					-- arrived is reported only for a squad that travels under this revision: never for a
-					-- stay or a hold, nor when the squad already stays at the site.
+					-- arrived is never reported for a stay or a hold, nor when the squad already stays at the
+					-- site by stock's action state (current_action == 1, stays_at) when the revision arrives;
+					-- a squad at its smart with another action state can still report it without travel.
 					local squad = SIMBOARD.squads[id]
 					objective.no_arrival = verb == "stay" or is_hold(objective) or
 						(squad ~= nil and stays_at(squad, site))
@@ -783,6 +863,11 @@ local function on_actor_update()
 			deactivate("xrsim_freeplay: engine mode is off, adapter stopped")
 			return
 		end
+		local notice, reason = failure_notice(current, failures_shown)
+		if notice then
+			emit("~ xrsim_freeplay: provider failure " .. reason .. ": " .. notice)
+			SetHudMsg(notice, 10)
+		end
 	end
 	scan_lone_step(now)
 	if now >= next_sync or (force_sync and now - last_sync >= FORCED_SYNC_GAP_MS) then
@@ -806,8 +891,9 @@ local function on_first_update()
 	local ok, text = call("ai.freeplay.mode", mode)
 	if not ok then
 		failed = true
-		emit("! xrsim_freeplay: " .. text)
-		SetHudMsg("xrsim_freeplay: " .. text, 10)
+		local sentence = refusal_message(text)
+		emit("! xrsim_freeplay: " .. text .. " - " .. sentence)
+		SetHudMsg(sentence, 10)
 		return false
 	end
 	local began, epoch = call("ai.freeplay.begin", "")
@@ -818,7 +904,9 @@ local function on_first_update()
 		return false
 	end
 	install_wrapper(class, stock)
-	log_info(text .. " " .. epoch)
+	local activated = activation_message(text)
+	log_info(activated .. " (" .. text .. " " .. epoch .. ")")
+	SetHudMsg(activated, 10)
 	active = true
 	local now = time_global()
 	scan_lone_full(now)

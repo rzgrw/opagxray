@@ -14,6 +14,8 @@ void FreeplayScheduler::Reset()
     m_backoffUntilMs = 0;
 }
 
+void FreeplayScheduler::SetConfig(const FreeplaySchedulerConfig& config) { m_config = config; }
+
 void FreeplayScheduler::Forget(uint64_t ownerId) { m_entries.erase(ownerId); }
 
 void FreeplayScheduler::RequestWake(uint64_t ownerId, const std::string& reason, uint64_t nowMs)
@@ -33,7 +35,8 @@ void FreeplayScheduler::RequestWake(uint64_t ownerId, const std::string& reason,
         wake.reasons.push_back(reason);
 }
 
-std::vector<uint64_t> FreeplayScheduler::TakeObservationRequests(const FreeplayPopulation& population, uint64_t nowMs)
+std::vector<uint64_t> FreeplayScheduler::TakeObservationRequests(
+    const FreeplayPopulation& population, uint64_t nowMs, size_t maxNew)
 {
     for (auto it = m_entries.begin(); it != m_entries.end();)
     {
@@ -77,7 +80,7 @@ std::vector<uint64_t> FreeplayScheduler::TakeObservationRequests(const FreeplayP
     size_t inFlight = InFlight();
     for (const auto& item : queued)
     {
-        if (inFlight >= m_config.maxInFlight)
+        if (inFlight >= m_config.maxInFlight || taken.size() >= maxNew)
             break;
         Entry& entry = m_entries[item.second];
         if (entry.decided && nowMs < entry.lastDecisionMs + m_config.minWakeIntervalMs)

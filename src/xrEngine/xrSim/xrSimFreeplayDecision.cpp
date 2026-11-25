@@ -194,7 +194,7 @@ FreeplayObservationParse ParseFreeplayObservation(const FreeplayPopulation& popu
 }
 
 ActorWakeContext BuildFreeplayWake(const FreeplayOwner& owner, const FreeplayObservation& observation,
-    const std::string& wakeReasons)
+    const std::string& wakeReasons, const std::string& recentlyBlockedSite)
 {
     ActorWakeContext context;
     context.actor.agentId = static_cast<uint32_t>(owner.ownerId & 0xffffffffull);
@@ -225,6 +225,8 @@ ActorWakeContext BuildFreeplayWake(const FreeplayOwner& owner, const FreeplayObs
     for (const std::string& memory : owner.memories)
         out += "memory " + memory + "\n";
     out += "wake_reasons " + (wakeReasons.empty() ? std::string("-") : wakeReasons) + "\n";
+    if (!recentlyBlockedSite.empty())
+        out += "recently_blocked_site " + recentlyBlockedSite + "\n";
     // Field names and units of the site and sighting lines that follow. A site's distance is the game-graph
     // distance stock ranks simulation targets by (comparable across levels), not metres.
     out += "site_fields name graph_distance kind occupants\n";
@@ -243,6 +245,8 @@ ActorWakeContext BuildFreeplayWake(const FreeplayOwner& owner, const FreeplayObs
     out += "response_record action move_to <site_name>\n";
     out += "response_record action retreat <site_name>\n";
     out += "site_name_must_be_listed\n";
+    if (!recentlyBlockedSite.empty())
+        out += "do_not_choose_recently_blocked_site\n";
     out += "response_record memory <single_token>\n";
     out += "response_alternative coast\n";
     out += "response_last_line end\n";

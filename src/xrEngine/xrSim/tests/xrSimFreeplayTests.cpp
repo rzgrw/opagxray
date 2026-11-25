@@ -1,5 +1,6 @@
 #include "xrSim/xrSimActorRuntime.h"
 #include "xrSim/xrSimBridge.h"
+#include "xrSim/xrSimClaudeCliProvider.h"
 #include "xrSim/xrSimFreeplay.h"
 #include "xrSim/xrSimFreeplayBridge.h"
 #include "xrSim/xrSimFreeplayDecision.h"
@@ -14,6 +15,19 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <cerrno>
+#include <climits>
+#include <cstdio>
+#include <csignal>
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern char** environ;
+#endif
 
 namespace
 {
@@ -969,8 +983,9 @@ void SetEnvironment(const char* name, const char* value)
 // Every variable the live provider reads, so no test depends on the developer's environment.
 void ClearProviderEnvironment()
 {
-    for (const char* name :
-        {"XRAY_AGENT_PROVIDER", "XRAY_AGENT_MODEL", "XRAY_AGENT_API_KEY", "ANTHROPIC_API_KEY", "XRAY_AGENT_TIMEOUT_MS"})
+    for (const char* name : {"XRAY_AGENT_PROVIDER", "XRAY_AGENT_MODEL", "XRAY_AGENT_API_KEY", "ANTHROPIC_API_KEY",
+             "XRAY_AGENT_TIMEOUT_MS", "XRAY_AGENT_CLI", "XRAY_FREEPLAY_MAX_IN_FLIGHT", "XRAY_FREEPLAY_CALLS_PER_MINUTE",
+             "XRAY_FREEPLAY_RECONSIDER_MS", "XRAY_FREEPLAY_MIN_WAKE_MS"})
         SetEnvironment(name, nullptr);
 }
 
@@ -983,8 +998,12 @@ void StartFreeplay(const char* mode)
     RequireSetup(xrSim::FreeplayResult{RequireVerb("ai.freeplay.sync", kTwoGroups) == "owners=3", "owners=3"});
 }
 
+// With no provider variable the provider resolves to claude_cli (1 in flight, 6 calls per minute); these flow
+// tests keep the anthropic scheduler defaults (2 in flight, no cap) unless a test names the provider itself.
 void StartLiveWith(std::unique_ptr<xrSim::IActorIntentProvider> provider, const std::string& snapshot)
 {
+    if (std::getenv("XRAY_AGENT_PROVIDER") == nullptr)
+        SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
     RequireVerb("ai.reset");
     xrSim::SetFreeplayProviderForTests(std::move(provider));
     RequireVerb("ai.freeplay.mode", "live");
@@ -1340,9 +1359,11 @@ bool TestModelCoastIsKept()
 bool TestLiveModeRefusedWithoutProvider()
 {
     ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_CLI", "/nonexistent/claude");   // no variable and no key: claude_cli, not found
     RequireVerb("ai.reset");
     const VerbReply live = Verb("ai.freeplay.mode", "live");
-    bool ok = Expect(!live.ok && live.text == "missing_api_key", ("live refused: " + live.text).c_str());
+    bool ok = Expect(!live.ok && live.text == "cli_unavailable", ("live refused: " + live.text).c_str());
+    ClearProviderEnvironment();
     ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "mode still off") && ok;
     const VerbReply observe = Verb("ai.freeplay.observe", kSquadObservation);
     return Expect(!observe.ok && observe.text == "mode_off", "observe refused in mode off") && ok;
@@ -1369,12 +1390,12 @@ bool TestLiveModeRefusalOrder()
     ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "mode still off without a model") && ok;
     SetEnvironment("XRAY_AGENT_MODEL", "test-model");
     const VerbReply withModel = Verb("ai.freeplay.mode", "live");
-    ok = Expect(withModel.ok ? withModel.text == "mode=live" : withModel.text == "transport_unavailable",
+    ok = Expect(withModel.ok ? withModel.text.rfind("mode=live ", 0) == 0 : withModel.text == "transport_unavailable",
         ("with a model only the transport can refuse: " + withModel.text).c_str()) && ok;
     ClearProviderEnvironment();
     RequireVerb("ai.reset");
     StartLive({});   // an installed test provider needs no environment
-    return Expect(RequireVerb("ai.freeplay.mode") == "mode=live", "test provider satisfies live mode") && ok;
+    return Expect(RequireVerb("ai.freeplay.mode").rfind("mode=live ", 0) == 0, "test provider satisfies live mode") && ok;
 }
 
 bool TestBlockedEventRewakesOwner()
@@ -1528,10 +1549,717 @@ bool TestRetireForgetsOwner()
     const VerbReply decide = Verb("ai.freeplay.decide", "1 stay");
     return Expect(!decide.ok && decide.text == "no_observation", "retire discards the stored observation") && ok;
 }
+
+// --- claude_cli provider ---
+
+const char* kCliModel = "claude-sonnet-5-5";
+
+// What a fake runner was asked to run.
+struct FakeCliCalls
+{
+    std::vector<std::vector<std::string>> argv;
+    std::vector<std::string> stdinText;
+    std::vector<uint32_t> timeoutMs;
+};
+
+// Answers Run from a script in order (then: not started) and never starts a process.
+class FakeCliRunner final : public xrSim::ICliRunner
+{
+public:
+    FakeCliRunner(std::vector<xrSim::CliRunResult> results, std::shared_ptr<FakeCliCalls> calls)
+        : m_results(std::move(results)), m_calls(std::move(calls))
+    {
+    }
+    xrSim::CliRunResult Run(const std::vector<std::string>& argv, const std::string& stdinText, uint32_t timeoutMs) override
+    {
+        m_calls->argv.push_back(argv);
+        m_calls->stdinText.push_back(stdinText);
+        m_calls->timeoutMs.push_back(timeoutMs);
+        if (m_cursor < m_results.size())
+            return m_results[m_cursor++];
+        xrSim::CliRunResult result;
+        result.error = "fake_runner_exhausted";
+        return result;
+    }
+    void Cancel() override {}
+
+private:
+    std::vector<xrSim::CliRunResult> m_results;
+    size_t m_cursor = 0;
+    std::shared_ptr<FakeCliCalls> m_calls;
+};
+
+xrSim::CliRunResult CliExit(int exitCode, const std::string& output, const std::string& error = std::string())
+{
+    xrSim::CliRunResult result;
+    result.started = true;
+    result.exitCode = exitCode;
+    result.output = output;
+    result.error = error;
+    return result;
+}
+
+std::unique_ptr<xrSim::ClaudeCliActorIntentProvider> CliProvider(
+    std::vector<xrSim::CliRunResult> results, std::shared_ptr<FakeCliCalls> calls)
+{
+    xrSim::ClaudeCliConfig config;
+    config.model = kCliModel;
+    return std::make_unique<xrSim::ClaudeCliActorIntentProvider>(
+        config, std::make_unique<FakeCliRunner>(std::move(results), std::move(calls)));
+}
+
+xrSim::ActorWakeContext CliWake()
+{
+    xrSim::ActorWakeContext context;
+    context.prompt = "xrsim_freeplay_wake_v1\nowner_id 1\nend\n";
+    return context;
+}
+
+bool TestCliArgumentsAreExact()
+{
+    xrSim::ClaudeCliConfig config;
+    config.model = kCliModel;
+    const std::vector<std::string> expected{"claude", "-p", "--model", "claude-sonnet-5-5", "--tools", "",
+        "--no-session-persistence", "--strict-mcp-config", "--setting-sources", "", "--system-prompt",
+        "You answer with the requested schema lines only. No prose, no markdown, no code fences."};
+    const std::vector<std::string> args = xrSim::BuildClaudeCliArguments(config);
+    bool ok = Expect(args == expected, "claude_cli argument vector is exact");
+    ok = Expect(std::find(args.begin(), args.end(), "--bare") == args.end(), "no --bare argument") && ok;
+    config.executable = "/opt/homebrew/bin/claude";
+    const std::vector<std::string> absolute = xrSim::BuildClaudeCliArguments(config);
+    return Expect(!absolute.empty() && absolute[0] == "/opt/homebrew/bin/claude", "argv[0] is the executable") && ok;
+}
+
+bool TestCliExtractsIntentBlock()
+{
+    const std::string block = "xrsim_actor_intent_v1\naction move_to esc_smart_c\nend\n";
+    const std::string wrapped = "Here is my answer:\n```\n" + block + "```\nHope that helps.\n";
+    bool ok = Expect(xrSim::ExtractIntentBlock(wrapped) == block, "block extracted from prose and fence");
+    ok = Expect(xrSim::ExtractIntentBlock("xrsim_actor_intent_v1\r\naction stay\r\nend\r\n") ==
+            "xrsim_actor_intent_v1\naction stay\nend\n",
+        "CRLF lines are accepted") && ok;
+    ok = Expect(xrSim::ExtractIntentBlock(block + "xrsim_actor_intent_v1\naction stay\nend\n") == block,
+        "only the first block") && ok;
+    ok = Expect(xrSim::ExtractIntentBlock("action move_to esc_smart_c\nend\n").empty(), "no header gives nothing") && ok;
+    return Expect(xrSim::ExtractIntentBlock("xrsim_actor_intent_v1\naction stay\n").empty(), "no end gives nothing") &&
+        ok;
+}
+
+bool TestCliProviderAcceptsReply()
+{
+    auto calls = std::make_shared<FakeCliCalls>();
+    auto provider = CliProvider({CliExit(0, "xrsim_actor_intent_v1\naction move_to esc_smart_c\nend\n")}, calls);
+    const xrSim::ActorWakeContext context = CliWake();
+    const xrSim::ActorProviderResult result = provider->Wake(context);
+    bool ok = Expect(result.ok && !result.coast && result.coastReason.empty(), ("reply accepted: " + result.error).c_str());
+    ok = Expect(result.plan.actions.size() == 1 && result.plan.actions[0].verb == "move_to" &&
+            result.plan.actions[0].target == "esc_smart_c",
+        "plan has move_to esc_smart_c") && ok;
+    ok = Expect(result.provider == "claude_cli" && result.model == kCliModel, "provider and model named") && ok;
+    ok = Expect(calls->stdinText.size() == 1 && calls->stdinText[0] == context.prompt, "the prompt goes to stdin") && ok;
+    ok = Expect(calls->argv.size() == 1 && calls->argv[0] == xrSim::BuildClaudeCliArguments(xrSim::ClaudeCliConfig{
+                                                                   "claude", kCliModel, 60000}),
+        "the runner gets the exact argument vector") && ok;
+    return Expect(calls->timeoutMs.size() == 1 && calls->timeoutMs[0] == 60000, "the configured timeout") && ok;
+}
+
+bool TestCliProviderMapsFailures()
+{
+    xrSim::CliRunResult notStarted;
+    notStarted.error = "not_found";
+    xrSim::CliRunResult timedOut = CliExit(-1, "partial");
+    timedOut.timedOut = true;
+    auto calls = std::make_shared<FakeCliCalls>();
+    auto provider = CliProvider({notStarted, timedOut, CliExit(2, "", "Error: not logged in"), CliExit(0, "hello\n"),
+                                    CliExit(0, "xrsim_actor_intent_v1\nteleport now\nend\n")},
+        calls);
+    const xrSim::ActorProviderResult unavailable = provider->Wake(CliWake());
+    bool ok = Expect(unavailable.coast && unavailable.coastReason == "cli_unavailable", "not started -> cli_unavailable");
+    const xrSim::ActorProviderResult timeout = provider->Wake(CliWake());
+    ok = Expect(timeout.coast && timeout.coastReason == "cli_timeout", "timed out -> cli_timeout") && ok;
+    const xrSim::ActorProviderResult exited = provider->Wake(CliWake());
+    ok = Expect(exited.coast && exited.coastReason == "cli_exit" && Contains(exited.error, "2") &&
+            Contains(exited.error, "not logged in"),
+        ("non-zero exit -> cli_exit with code and stderr line: " + exited.error).c_str()) && ok;
+    const xrSim::ActorProviderResult prose = provider->Wake(CliWake());
+    ok = Expect(!prose.ok && prose.coastReason.empty() && !prose.error.empty(), "exit 0 with prose -> not ok") && ok;
+    const xrSim::ActorProviderResult bad = provider->Wake(CliWake());
+    ok = Expect(!bad.ok && bad.coastReason.empty() && !bad.error.empty(), "unparsable block -> not ok") && ok;
+    for (const xrSim::ActorProviderResult* result : {&unavailable, &timeout, &exited, &prose, &bad})
+        ok = Expect(result->provider == "claude_cli" && result->model == kCliModel, "every result names provider and model") &&
+            ok;
+    return ok;
+}
+
+bool TestCliLiveDecisionFlow()
+{
+    ClearProviderEnvironment();
+    auto calls = std::make_shared<FakeCliCalls>();
+    StartLiveWith(CliProvider({CliExit(0, std::string("Sure.\n") + kLiveMoveReply)}, calls), kTwoGroups);
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    const std::string ticks = TickUntilLogged("verdict=accepted", 1);
+    bool ok = Expect(Contains(ticks, "apply 1 500 2 move_to esc_smart_c live\n"), ("live apply line: " + ticks).c_str());
+    const std::string log = RequireVerb("ai.freeplay.log");
+    ok = Expect(Contains(log, "source=live verdict=accepted verb=move_to site=esc_smart_c provider=claude_cli "
+                              "model=claude-sonnet-5-5 "),
+        ("claude_cli ledger line: " + log).c_str()) && ok;
+    return Expect(calls->stdinText.size() == 1 && Contains(calls->stdinText[0], "xrsim_freeplay_wake_v1\n"),
+               "the wake prompt went to the runner's stdin") && ok;
+}
+
+bool TestCliLiveModeRefusals()
+{
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+#if defined(_WIN32)
+    // No Windows runner yet: claude_cli (also what an unset provider without a key resolves to) says so first.
+    const VerbReply unsupported = Verb("ai.freeplay.mode", "live");
+    bool unsupportedOk = Expect(!unsupported.ok && unsupported.text == "unsupported_platform",
+        ("windows refuses claude_cli plainly: " + unsupported.text).c_str());
+    SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
+    SetEnvironment("XRAY_AGENT_CLI", "C:/nonexistent/claude");
+    const VerbReply explicitCli = Verb("ai.freeplay.mode", "live");
+    unsupportedOk = Expect(!explicitCli.ok && explicitCli.text == "unsupported_platform",
+        ("windows refuses an explicit claude_cli: " + explicitCli.text).c_str()) && unsupportedOk;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return unsupportedOk;
+#endif
+    SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
+    SetEnvironment("XRAY_AGENT_CLI", "/nonexistent/claude");
+    const VerbReply noModel = Verb("ai.freeplay.mode", "live");
+    bool ok = Expect(!noModel.ok && noModel.text == "cli_unavailable",
+        ("no model is no refusal for claude_cli (it uses sonnet): " + noModel.text).c_str());
+    SetEnvironment("XRAY_AGENT_MODEL", "a b");
+    const VerbReply badModel = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!badModel.ok && badModel.text == "invalid_model", ("model with a space: " + badModel.text).c_str()) && ok;
+    SetEnvironment("XRAY_AGENT_MODEL", kCliModel);
+    const VerbReply missing = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!missing.ok && missing.text == "cli_unavailable", ("missing executable: " + missing.text).c_str()) && ok;
+    SetEnvironment("XRAY_AGENT_CLI", "claude;rm");
+    const VerbReply badCli = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!badCli.ok && badCli.text == "invalid_cli", ("executable with a ';': " + badCli.text).c_str()) && ok;
+    SetEnvironment("XRAY_AGENT_CLI", "xrsim_no_such_cli_on_path");
+    const VerbReply notOnPath = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!notOnPath.ok && notOnPath.text == "cli_unavailable", ("bare name not on PATH: " + notOnPath.text).c_str()) &&
+        ok;
+    ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "mode still off") && ok;
+    SetEnvironment("XRAY_AGENT_PROVIDER", "bogus");
+    const VerbReply bogus = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!bogus.ok && bogus.text == "provider_disabled", ("other provider: " + bogus.text).c_str()) && ok;
+#if !defined(_WIN32)
+    // An existing executable and a model are all claude_cli needs: no API key. Nothing observes, so nothing runs.
+    SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
+    SetEnvironment("XRAY_AGENT_CLI", "/bin/cat");
+    const VerbReply live = Verb("ai.freeplay.mode", "live");
+    ok = Expect(live.ok && live.text.rfind("mode=live", 0) == 0, ("claude_cli without a key: " + live.text).c_str()) && ok;
+#endif
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return ok;
+}
+
+// --- live settings and the call budget ---
+
+VerbReply LiveWithTestProvider(std::unique_ptr<xrSim::IActorIntentProvider> provider)
+{
+    RequireVerb("ai.reset");
+    xrSim::SetFreeplayProviderForTests(std::move(provider));
+    return Verb("ai.freeplay.mode", "live");
+}
+
+std::unique_ptr<xrSim::IActorIntentProvider> NoReplies()
+{
+    return std::make_unique<xrSim::RecordedActorIntentProvider>(std::vector<std::string>{});
+}
+
+std::string ObserveLines(const std::string& tick)
+{
+    std::istringstream lines(tick);
+    std::string line, out;
+    while (std::getline(lines, line))
+        if (line.rfind("observe ", 0) == 0)
+            out += line + "\n";
+    return out;
+}
+
+bool TestLiveSettingsFromEnvironment()
+{
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_FREEPLAY_MAX_IN_FLIGHT", "3");
+    SetEnvironment("XRAY_FREEPLAY_CALLS_PER_MINUTE", "10");
+    SetEnvironment("XRAY_FREEPLAY_RECONSIDER_MS", "120000");
+    SetEnvironment("XRAY_FREEPLAY_MIN_WAKE_MS", "5000");
+    const VerbReply live = LiveWithTestProvider(NoReplies());
+    const std::string expected = "mode=live provider=claude_cli model=sonnet max_in_flight=3 calls_per_minute=10 "
+                                 "reconsider_ms=120000 min_wake_ms=5000";
+    bool ok = Expect(live.ok && live.text == expected, ("settings echoed: " + live.text).c_str());
+    ok = Expect(RequireVerb("ai.freeplay.mode") == expected, "a mode query echoes the settings too") && ok;
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", FiveSquads());
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "0")) ==
+            "observe 1 group 500 1\nobserve 2 group 501 1\nobserve 3 group 502 1\n",
+        "max_in_flight 3 hands out three owners") && ok;
+
+    const std::vector<std::pair<const char*, const char*>> bad{{"XRAY_FREEPLAY_MAX_IN_FLIGHT", "9"},
+        {"XRAY_FREEPLAY_MAX_IN_FLIGHT", "0"}, {"XRAY_FREEPLAY_MAX_IN_FLIGHT", "two"},
+        {"XRAY_FREEPLAY_CALLS_PER_MINUTE", "-1"}, {"XRAY_FREEPLAY_RECONSIDER_MS", "59999"},
+        {"XRAY_FREEPLAY_RECONSIDER_MS", "86400001"}, {"XRAY_FREEPLAY_MIN_WAKE_MS", "4999"},
+        {"XRAY_FREEPLAY_MIN_WAKE_MS", "3600001"}};
+    for (const auto& item : bad)
+    {
+        ClearProviderEnvironment();
+        SetEnvironment(item.first, item.second);
+        const VerbReply refused = LiveWithTestProvider(NoReplies());
+        ok = Expect(!refused.ok && refused.text == std::string("invalid_setting:") + item.first,
+            (std::string("bad ") + item.first + "=" + item.second + ": " + refused.text).c_str()) && ok;
+        ok = Expect(RequireVerb("ai.freeplay.mode") == "mode=off", "a refused setting leaves the mode off") && ok;
+    }
+
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
+    SetEnvironment("XRAY_AGENT_MODEL", kCliModel);
+    const VerbReply cli = LiveWithTestProvider(NoReplies());
+    ok = Expect(cli.ok && cli.text == "mode=live provider=claude_cli model=claude-sonnet-5-5 max_in_flight=1 "
+                                      "calls_per_minute=6 reconsider_ms=600000 min_wake_ms=45000",
+        ("claude_cli defaults: " + cli.text).c_str()) && ok;
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
+    const VerbReply anthropic = LiveWithTestProvider(NoReplies());
+    ok = Expect(anthropic.ok && anthropic.text == "mode=live provider=anthropic model=- max_in_flight=2 "
+                                                  "calls_per_minute=0 reconsider_ms=600000 min_wake_ms=45000",
+        ("anthropic defaults: " + anthropic.text).c_str()) && ok;
+    ok = Expect(RequireVerb("ai.freeplay.mode", "off") == "mode=off", "mode off has no settings tail") && ok;
+    RequireVerb("ai.reset");
+    return ok;
+}
+
+bool TestCallsPerMinuteCap()
+{
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_FREEPLAY_CALLS_PER_MINUTE", "2");
+    SetEnvironment("XRAY_FREEPLAY_MAX_IN_FLIGHT", "8");
+    const VerbReply live = LiveWithTestProvider(std::make_unique<CoastProvider>(""));
+    bool ok = Expect(live.ok, ("live with a cap: " + live.text).c_str());
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", FiveSquads());
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "0")) == "observe 1 group 500 1\nobserve 2 group 501 1\n",
+        "cap 2: two owners handed out") && ok;
+    RequireVerb("ai.freeplay.observe", ObservationFor(1, 1, 1, 0));   // submitted at 0
+    RequireVerb("ai.freeplay.tick", "1000");
+    RequireVerb("ai.freeplay.observe", ObservationFor(2, 1, 1, 0));   // submitted at 1000
+    for (int i = 0; i < 200 && !Contains(OwnerLine(2), "state=idle"); ++i)
+    {
+        ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "1000")).empty(), "nothing more while settling") && ok;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ok = Expect(Contains(OwnerLine(1), "state=idle") && Contains(OwnerLine(2), "state=idle"),
+        "both replies settled and freed their slots") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "30000")).empty(), "free slots but no budget at 30000") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "59999")).empty(), "no budget 1 ms before the window") && ok;
+    ok = Expect(Contains(OwnerLine(3), "state=queued"), "the third owner keeps its place in the queue") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "60000")) == "observe 3 group 502 1\n",
+        "the first submission leaves the window at 60000: one owner") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "60500")).empty(),
+        "a hand-out awaiting its observation counts against the cap") && ok;
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "61000")) == "observe 4 group 503 1\n",
+        "the second submission leaves the window at 61000") && ok;
+
+    // Recorded mode ignores the cap.
+    RequireVerb("ai.reset");
+    SetEnvironment("XRAY_FREEPLAY_CALLS_PER_MINUTE", "1");
+    RequireVerb("ai.freeplay.mode", "recorded");
+    RequireVerb("ai.freeplay.begin");
+    RequireVerb("ai.freeplay.sync", FiveSquads());
+    ok = Expect(ObserveLines(RequireVerb("ai.freeplay.tick", "0")) == "observe 1 group 500 1\nobserve 2 group 501 1\n",
+        "recorded mode ignores the cap") && ok;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return ok;
+}
+
+// --- blocked-site memory ---
+
+size_t CountOf(const std::string& text, const std::string& part)
+{
+    size_t count = 0;
+    for (size_t at = text.find(part); at != std::string::npos; at = text.find(part, at + 1))
+        ++count;
+    return count;
+}
+
+bool TestRecentlyBlockedSiteIsRejected()
+{
+    DecideMoveToC();
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_c");
+    bool ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 "),
+        ("blocked objective reverted: " + OwnerLine(1)).c_str());
+    const VerbReply again = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    ok = Expect(!again.ok && again.text == "recently_blocked", ("blocked site rejected: " + again.text).c_str()) && ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 "),
+        ("rejection keeps objective and revision: " + OwnerLine(1)).c_str()) && ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.log"), "source=recorded verdict=recently_blocked verb=move_to "
+                                                         "site=esc_smart_c "),
+        "rejection is logged") && ok;
+    ok = Expect(!Contains(RequireVerb("ai.freeplay.tick", "2"), "apply 1 500 4"), "rejection applies nothing") && ok;
+    const VerbReply retreat = Verb("ai.freeplay.decide", "1 retreat esc_smart_c");
+    ok = Expect(!retreat.ok && retreat.text == "recently_blocked", "retreat to the blocked site rejected too") && ok;
+    const VerbReply other = Verb("ai.freeplay.decide", "1 move_to esc_smart_a");
+    ok = Expect(other.ok && other.text == "accepted move_to esc_smart_a", ("other site accepted: " + other.text).c_str()) &&
+        ok;
+    return Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_a source=recorded rev=4 "),
+               ("other site raises the revision: " + OwnerLine(1)).c_str()) && ok;
+}
+
+bool TestRecentlyBlockedExpiresAndClears()
+{
+    DecideMoveToC();   // ticks 0 and 1
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_c");   // remembered at 1
+    RequireVerb("ai.freeplay.tick", "600000");
+    const VerbReply held = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    bool ok = Expect(!held.ok && held.text == "recently_blocked", ("still blocked 1 ms before expiry: " + held.text).c_str());
+    RequireVerb("ai.freeplay.tick", "600001");
+    const VerbReply expired = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    ok = Expect(expired.ok && expired.text == "accepted move_to esc_smart_c",
+        ("accepted after 600000 ms: " + expired.text).c_str()) && ok;
+
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_c");
+    ok = Expect(Verb("ai.freeplay.decide", "1 move_to esc_smart_c").text == "recently_blocked", "blocked again") && ok;
+    RequireVerb("ai.freeplay.event", "500 arrived esc_smart_b");
+    const VerbReply cleared = Verb("ai.freeplay.decide", "1 move_to esc_smart_c");
+    ok = Expect(cleared.ok && cleared.text == "accepted move_to esc_smart_c",
+        ("an arrival clears the memory: " + cleared.text).c_str()) && ok;
+    return ok;
+}
+
+bool TestBlockedStayLoopIsBroken()
+{
+    const char* stay = "xrsim_actor_intent_v1\naction stay\nend\n";
+    auto prompts = std::make_shared<std::vector<std::string>>();
+    StartLiveWith(std::make_unique<CapturingProvider>(std::vector<std::string>{stay, stay, stay}, prompts), kTwoGroups);
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    bool ok = Expect(Contains(TickUntilLogged("verdict=accepted", 1), "apply 1 500 2 stay esc_smart_a live\n"),
+        "first stay accepted at rev 2");
+
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_a");   // stock refuses the squad's own smart
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 ") &&
+            Contains(OwnerLine(1), "state=queued "),
+        ("blocked stay reverts and wakes: " + OwnerLine(1)).c_str()) && ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.tick", "46000"), "observe 1 group 500 1\n"), "owner 1 woken") && ok;
+    RequireVerb("ai.freeplay.observe", kSquadObservation);
+    const std::string ticks = TickUntilLogged("verdict=recently_blocked", 46000);
+    ok = Expect(!Contains(ticks, "apply 1 "), ("second stay applies nothing: " + ticks).c_str()) && ok;
+    ok = Expect(Contains(RequireVerb("ai.freeplay.log"), "source=live verdict=recently_blocked verb=stay site=esc_smart_a "),
+        "second stay is recently_blocked") && ok;
+    ok = Expect(Contains(OwnerLine(1), "objective=move_to:esc_smart_b source=hold rev=3 ") &&
+            Contains(OwnerLine(1), "state=idle "),
+        ("no new revision, owner idle: " + OwnerLine(1)).c_str()) && ok;
+    ok = Expect(prompts->size() == 2 && !Contains((*prompts)[0], "recently_blocked_site") &&
+            Contains((*prompts)[1], "recently_blocked_site esc_smart_a\n"),
+        "the second prompt names the blocked site") && ok;
+
+    // The adapter reports the same blocked site again: logged, but no wake, so the loop cannot restart.
+    const size_t events = CountOf(RequireVerb("ai.freeplay.log", "100"), "verdict=event");
+    RequireVerb("ai.freeplay.event", "500 blocked esc_smart_a");
+    ok = Expect(CountOf(RequireVerb("ai.freeplay.log", "100"), "verdict=event") == events + 1,
+        "repeated blocked event still logged") && ok;
+    ok = Expect(Contains(OwnerLine(1), "state=idle "), ("repeated blocked event wakes nobody: " + OwnerLine(1)).c_str()) &&
+        ok;
+    for (const char* now : {"100000", "400000", "645999"})
+        ok = Expect(!Contains(RequireVerb("ai.freeplay.tick", now), "observe 1 "),
+            (std::string("no wake before the reconsider interval at ") + now).c_str()) && ok;
+    ok = Expect(prompts->size() == 2, "no further provider call") && ok;
+    return Expect(Contains(RequireVerb("ai.freeplay.tick", "646000"), "observe 1 group 500 1\n"),
+               "woken again by the reconsider interval") && ok;
+}
+
+bool TestWakePromptNamesBlockedSite()
+{
+    xrSim::FreeplayPopulation population;
+    RequireSetup(population.Sync(kTwoGroups));
+    const xrSim::FreeplayObservation observation = RequireObservation(population, kSquadObservation);
+    const xrSim::FreeplayOwner& squad = RequireGroup(population, 500);
+    const std::string plain = xrSim::BuildFreeplayWake(squad, observation, "blocked").prompt;
+    const std::string named = xrSim::BuildFreeplayWake(squad, observation, "blocked", "esc_smart_c").prompt;
+    bool ok = Expect(!Contains(plain, "recently_blocked_site") && !Contains(plain, "do_not_choose_recently_blocked_site"),
+        "no blocked lines without a memory");
+    ok = Expect(Contains(named, "\nrecently_blocked_site esc_smart_c\n"), "blocked site line") && ok;
+    const size_t rules = named.find("\nrules\n");
+    const size_t rule = named.find("\ndo_not_choose_recently_blocked_site\n");
+    ok = Expect(rule != std::string::npos && rules != std::string::npos && rule > rules, "rule line among the rules") && ok;
+    std::string stripped = named;
+    for (const char* line : {"recently_blocked_site esc_smart_c\n", "do_not_choose_recently_blocked_site\n"})
+    {
+        const size_t at = stripped.find(line);
+        if (at != std::string::npos)
+            stripped.erase(at, std::string(line).size());
+    }
+    return Expect(stripped == plain, "otherwise the same prompt") && ok;
+}
+
+// --- provider resolution and the last provider failure ---
+
+bool TestProviderResolvesFromEnvironment()
+{
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_CLI", "/bin/cat");   // stands in for an installed CLI; nothing observes, nothing runs
+    RequireVerb("ai.reset");
+    const VerbReply plain = Verb("ai.freeplay.mode", "live");
+    bool ok = Expect(plain.ok && plain.text.rfind("mode=live provider=claude_cli model=sonnet max_in_flight=1 "
+                                                  "calls_per_minute=6 ", 0) == 0,
+        ("no variable and no key: claude_cli with sonnet: " + plain.text).c_str());
+    for (const char* key : {"ANTHROPIC_API_KEY", "XRAY_AGENT_API_KEY"})
+    {
+        RequireVerb("ai.reset");
+        SetEnvironment(key, "not-a-real-key");
+        const VerbReply keyed = Verb("ai.freeplay.mode", "live");
+        ok = Expect(!keyed.ok && keyed.text == "missing_model",
+            (std::string("a key in ") + key + " resolves to anthropic, which needs a model: " + keyed.text).c_str()) && ok;
+        SetEnvironment(key, nullptr);
+    }
+    RequireVerb("ai.reset");
+    SetEnvironment("ANTHROPIC_API_KEY", "not-a-real-key");
+    SetEnvironment("XRAY_AGENT_PROVIDER", "claude_cli");
+    const VerbReply explicitCli = Verb("ai.freeplay.mode", "live");
+    ok = Expect(explicitCli.ok && explicitCli.text.rfind("mode=live provider=claude_cli model=sonnet ", 0) == 0,
+        ("an explicit provider wins over a key: " + explicitCli.text).c_str()) && ok;
+    RequireVerb("ai.reset");
+    SetEnvironment("ANTHROPIC_API_KEY", nullptr);
+    SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
+    const VerbReply explicitAnthropic = Verb("ai.freeplay.mode", "live");
+    ok = Expect(!explicitAnthropic.ok && explicitAnthropic.text == "missing_api_key",
+        ("an explicit anthropic without a key: " + explicitAnthropic.text).c_str()) && ok;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return ok;
+}
+
+// Answers with a provider-originated coast for each listed reason in turn, then with a model coast.
+class SequenceProvider final : public xrSim::IActorIntentProvider
+{
+public:
+    explicit SequenceProvider(std::vector<std::string> reasons) : m_reasons(std::move(reasons)) {}
+    xrSim::ActorProviderResult Wake(const xrSim::ActorWakeContext&) override
+    {
+        xrSim::ActorProviderResult result;
+        result.ok = true;
+        result.coast = true;
+        result.plan.coast = true;
+        result.coastReason = m_cursor < m_reasons.size() ? m_reasons[m_cursor++] : std::string();
+        result.error = result.coastReason.empty() ? std::string() : "exit=1 Please run /login";
+        result.provider = "test-sequence";
+        result.model = "fixture";
+        return result;
+    }
+
+private:
+    std::vector<std::string> m_reasons;
+    size_t m_cursor = 0;
+};
+
+bool TestLastFailureInModeReply()
+{
+    ClearProviderEnvironment();
+    SetEnvironment("XRAY_AGENT_PROVIDER", "anthropic");
+    StartLiveWith(std::make_unique<SequenceProvider>(std::vector<std::string>{"cli_exit"}), FiveSquads());
+    bool ok = Expect(!Contains(RequireVerb("ai.freeplay.mode"), "last_failure"), "no failure yet");
+    RequireVerb("ai.freeplay.tick", "0");
+    RequireVerb("ai.freeplay.observe", ObservationFor(1, 1, 1, 0));
+    TickUntilLogged("source=hold", 0);
+    const std::string failed = RequireVerb("ai.freeplay.mode");
+    ok = Expect(failed.size() >= std::string(" last_failure=cli_exit").size() &&
+            failed.compare(failed.size() - std::string(" last_failure=cli_exit").size(), std::string::npos,
+                " last_failure=cli_exit") == 0,
+        ("last_failure is the last field and one token: " + failed).c_str()) && ok;
+    // Once the 30000 ms backoff has ended the next owner is handed out and gets a model coast.
+    ok = Expect(Contains(RequireVerb("ai.freeplay.tick", "30001"), "observe 3 "), "owner 3 handed out after the backoff") &&
+        ok;
+    RequireVerb("ai.freeplay.observe", ObservationFor(3, 1, 1, 0));
+    TickUntilLogged("verdict=kept", 30001);
+    const std::string recovered = RequireVerb("ai.freeplay.mode");
+    ok = Expect(!Contains(recovered, "last_failure"), ("a success clears it: " + recovered).c_str()) && ok;
+    ClearProviderEnvironment();
+    RequireVerb("ai.reset");
+    return ok;
+}
+
+#if !defined(_WIN32)
+// True when this process has no child left, reaped or not.
+bool NoChildLeft()
+{
+    int status = 0;
+    return waitpid(-1, &status, WNOHANG) == -1 && errno == ECHILD;
+}
+
+size_t OpenDescriptorCount()
+{
+    size_t count = 0;
+    for (int fd = 0; fd < 1024; ++fd)
+        if (fcntl(fd, F_GETFD) != -1)
+            ++count;
+    return count;
+}
+
+long ElapsedMs(std::chrono::steady_clock::time_point since)
+{
+    return static_cast<long>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - since).count());
+}
+
+bool TestProcessRunnerEchoAndTimeout()
+{
+    const size_t descriptors = OpenDescriptorCount();
+    auto runner = xrSim::CreateProcessCliRunner();
+    const xrSim::CliRunResult echo = runner->Run({"/bin/cat"}, "hello\nworld\n", 5000);
+    bool ok = Expect(echo.started && !echo.timedOut && echo.exitCode == 0 && echo.output == "hello\nworld\n",
+        ("/bin/cat echoes stdin: " + echo.error).c_str());
+
+    std::string big;
+    for (int i = 0; big.size() < 300000; ++i)
+        big += "line " + std::to_string(i) + " of a reply larger than a pipe buffer\n";
+    const xrSim::CliRunResult large = runner->Run({"/bin/cat"}, big, 10000);
+    ok = Expect(large.exitCode == 0 && large.output == big, "output larger than a pipe buffer arrives whole") && ok;
+
+    const xrSim::CliRunResult failed = runner->Run({"/bin/sh", "-c", "echo first line >&2; echo second >&2; exit 3"}, "", 5000);
+    ok = Expect(failed.started && failed.exitCode == 3 && failed.error == "first line",
+        ("exit code and first stderr line: " + failed.error).c_str()) && ok;
+
+    char tempPath[] = "/tmp/xrsim_cli_fd_XXXXXX";
+    const int leak = mkstemp(tempPath);   // no close-on-exec
+    if (leak >= 0)
+    {
+        const std::string probe = "if true >&" + std::to_string(leak) + " 2>/dev/null; then echo open; else echo closed; fi";
+        const xrSim::CliRunResult inherited = runner->Run({"/bin/sh", "-c", probe}, "", 5000);
+        ok = Expect(inherited.output == "closed\n", ("child inherits no other descriptor: " + inherited.output).c_str()) && ok;
+        close(leak);
+        unlink(tempPath);
+    }
+
+    const xrSim::CliRunResult where = runner->Run({"/bin/pwd"}, "", 5000);
+    char cwd[PATH_MAX] = {};
+    ok = Expect(where.exitCode == 0 && getcwd(cwd, sizeof(cwd)) != nullptr && where.output != std::string(cwd) + "\n",
+        ("child runs outside the game's directory: " + where.output).c_str()) && ok;
+
+    auto started = std::chrono::steady_clock::now();
+    const xrSim::CliRunResult slow = runner->Run({"/bin/sleep", "5"}, "", 200);
+    ok = Expect(slow.started && slow.timedOut && ElapsedMs(started) < 2000, "sleep 5 times out within 2 s") && ok;
+    ok = Expect(NoChildLeft(), "timed out child reaped") && ok;
+
+    started = std::chrono::steady_clock::now();
+    const xrSim::CliRunResult stubborn = runner->Run({"/bin/sh", "-c", "trap '' TERM; sleep 5"}, "", 200);
+    ok = Expect(stubborn.timedOut && ElapsedMs(started) < 2000, "a child that ignores SIGTERM is killed within 2 s") && ok;
+    ok = Expect(NoChildLeft(), "stubborn child reaped") && ok;
+
+    const xrSim::CliRunResult missing = runner->Run({"/nonexistent/xrsim_cli"}, "x", 1000);
+    ok = Expect(!missing.started && !missing.error.empty(), "missing executable does not start") && ok;
+    const xrSim::CliRunResult notOnPath = runner->Run({"xrsim_no_such_cli_on_path"}, "x", 1000);
+    ok = Expect(!notOnPath.started, "bare name not on PATH does not start") && ok;
+
+    // Cancel from another thread while Run waits on a child.
+    xrSim::CliRunResult cancelled;
+    started = std::chrono::steady_clock::now();
+    std::thread worker([&] { cancelled = runner->Run({"/bin/sleep", "5"}, "", 10000); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    runner->Cancel();
+    worker.join();
+    ok = Expect(cancelled.started && !cancelled.timedOut && cancelled.exitCode != 0 && ElapsedMs(started) < 2000,
+        "Cancel ends a running child promptly") && ok;
+    ok = Expect(NoChildLeft(), "cancelled child reaped") && ok;
+    started = std::chrono::steady_clock::now();
+    const xrSim::CliRunResult afterCancel = runner->Run({"/bin/sleep", "5"}, "", 10000);
+    ok = Expect(!afterCancel.started && ElapsedMs(started) < 500, "a cancelled runner starts nothing") && ok;
+
+    // Cancel before Run: the race where shutdown cancels just before the worker starts its child.
+    auto early = xrSim::CreateProcessCliRunner();
+    early->Cancel();
+    ok = Expect(!early->Run({"/bin/sleep", "5"}, "", 10000).started, "Cancel before Run starts nothing") && ok;
+
+    runner.reset();
+    early.reset();
+    ok = Expect(xrSim::IsCliExecutableAvailable("/bin/cat") && xrSim::IsCliExecutableAvailable("sh") &&
+            !xrSim::IsCliExecutableAvailable("/nonexistent/claude") &&
+            !xrSim::IsCliExecutableAvailable("xrsim_no_such_cli_on_path") && !xrSim::IsCliExecutableAvailable("/tmp") &&
+            !xrSim::IsCliExecutableAvailable("bin/cat") && !xrSim::IsCliExecutableAvailable(""),
+        "executable lookup") && ok;
+    return Expect(OpenDescriptorCount() == descriptors, "no descriptor leaked") && ok;
+}
+
+std::vector<std::string> g_cliWarnings;
+void CaptureCliWarning(const char* line) { g_cliWarnings.push_back(line); }
+
+// The reap after SIGKILL is polled with a limit. A child that does not exit in time (in real life one stuck in
+// uninterruptible sleep, which a test cannot produce on demand; here a child that was simply not killed) is
+// left unreaped with one warning, instead of blocking the worker and the join at quit.
+bool TestKilledChildReapIsBounded()
+{
+    g_cliWarnings.clear();
+    xrSim::SetCliWarningSink(&CaptureCliWarning);
+    char sleepPath[] = "/bin/sleep";
+    char seconds[] = "5";
+    char* argv[] = {sleepPath, seconds, nullptr};
+    pid_t pid = -1;
+    bool ok = Expect(posix_spawn(&pid, "/bin/sleep", nullptr, nullptr, argv, environ) == 0, "spawn sleep 5");
+    auto started = std::chrono::steady_clock::now();
+    const int abandoned = xrSim::ReapKilledChild(pid, 200);
+    ok = Expect(abandoned == -1 && ElapsedMs(started) < 1000, "a child that does not exit is given up after the limit") && ok;
+    ok = Expect(g_cliWarnings.size() == 1 && Contains(g_cliWarnings[0], "claude_cli") &&
+            Contains(g_cliWarnings[0], std::to_string(pid)) && Contains(g_cliWarnings[0], "200 ms"),
+        ("one warning line: " + (g_cliWarnings.empty() ? std::string("none") : g_cliWarnings[0])).c_str()) && ok;
+    kill(pid, SIGKILL);
+    started = std::chrono::steady_clock::now();
+    const int reaped = xrSim::ReapKilledChild(pid, 3000);
+    ok = Expect(reaped == 128 + SIGKILL && ElapsedMs(started) < 3000, "a killed child is reaped with its signal") && ok;
+    ok = Expect(g_cliWarnings.size() == 1, "no warning when the reap succeeds") && ok;
+    ok = Expect(NoChildLeft(), "the sleep child was reaped") && ok;
+    xrSim::SetCliWarningSink(nullptr);
+    return ok;
+}
+
+// The engine removes from the CLI child's environment exactly the variables tools/freeplay_play.py removes from
+// the game's (test_freeplay_play.py checks that the two lists are the same).
+bool TestCliChildEnvironmentIsStripped()
+{
+    const std::vector<std::string> parent = {"PATH=/usr/bin", "HOME=/home/p", "ANTHROPIC_API_KEY=k1",
+        "XRAY_AGENT_API_KEY=k2", "ANTHROPIC_AUTH_TOKEN=t", "ANTHROPIC_BASE_URL=http://proxy", "CLAUDECODE=1",
+        "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CODE_MESSAGING_SOCKET=/sock", "CLAUDE_CONFIG_DIR=/home/p/.claude",
+        "ANTHROPIC_API_KEY_NOTE=kept", "XRAY_AGENT_MODEL=sonnet", "NO_EQUALS_SIGN"};
+    const std::vector<std::string> expected = {"PATH=/usr/bin", "HOME=/home/p", "CLAUDE_CONFIG_DIR=/home/p/.claude",
+        "ANTHROPIC_API_KEY_NOTE=kept", "XRAY_AGENT_MODEL=sonnet", "NO_EQUALS_SIGN"};
+    bool ok = Expect(xrSim::CliChildEnvironment(parent) == expected, "key, endpoint and session variables removed, the rest kept");
+    const std::vector<std::string>& names = xrSim::CliRemovedEnvironmentNames();
+    for (const char* required : {"ANTHROPIC_API_KEY", "XRAY_AGENT_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+             "CLAUDECODE", "CLAUDE_CODE_SESSION_ID"})
+        ok = Expect(std::find(names.begin(), names.end(), required) != names.end(), required) && ok;
+    for (const std::string& name : names)
+        ok = Expect(xrSim::CliChildEnvironment({name + "=v"}).empty(), ("removed: " + name).c_str()) && ok;
+
+    // The real runner applies it.
+    SetEnvironment("ANTHROPIC_AUTH_TOKEN", "secret");
+    SetEnvironment("CLAUDECODE", "1");
+    SetEnvironment("CLAUDE_CONFIG_DIR", "/tmp/xrsim_config");
+    const xrSim::CliRunResult env = xrSim::CreateProcessCliRunner()->Run({"/usr/bin/env"}, "", 5000);
+    ok = Expect(env.exitCode == 0 && !Contains(env.output, "ANTHROPIC_AUTH_TOKEN") && !Contains(env.output, "CLAUDECODE=") &&
+            Contains(env.output, "CLAUDE_CONFIG_DIR=/tmp/xrsim_config\n"),
+        "the child's environment is the stripped one") && ok;
+    SetEnvironment("ANTHROPIC_AUTH_TOKEN", nullptr);
+    SetEnvironment("CLAUDECODE", nullptr);
+    SetEnvironment("CLAUDE_CONFIG_DIR", nullptr);
+    return ok;
+}
+#else
+bool TestProcessRunnerEchoAndTimeout()
+{
+    const xrSim::CliRunResult result = xrSim::CreateProcessCliRunner()->Run({"cmd"}, "", 1000);
+    return Expect(!result.started && result.error == "unsupported_platform", "windows runner is a stub");
+}
+#endif
 } // namespace
 
 int main()
 {
+    ClearProviderEnvironment();   // no test depends on the developer's environment
     bool ok = true;
     ok = TestSyncEnrollsEveryNpc() && ok;
     ok = TestSyncIsAtomicOnBadRecord() && ok;
@@ -1585,6 +2313,25 @@ int main()
     ok = TestResetClearsFreeplay() && ok;
     ok = TestRecordedObservationsFreeSlots() && ok;
     ok = TestRetireForgetsOwner() && ok;
+    ok = TestCliArgumentsAreExact() && ok;
+    ok = TestCliExtractsIntentBlock() && ok;
+    ok = TestCliProviderAcceptsReply() && ok;
+    ok = TestCliProviderMapsFailures() && ok;
+    ok = TestCliLiveDecisionFlow() && ok;
+    ok = TestCliLiveModeRefusals() && ok;
+    ok = TestProcessRunnerEchoAndTimeout() && ok;
+    ok = TestLiveSettingsFromEnvironment() && ok;
+    ok = TestCallsPerMinuteCap() && ok;
+    ok = TestRecentlyBlockedSiteIsRejected() && ok;
+    ok = TestRecentlyBlockedExpiresAndClears() && ok;
+    ok = TestBlockedStayLoopIsBroken() && ok;
+    ok = TestWakePromptNamesBlockedSite() && ok;
+    ok = TestProviderResolvesFromEnvironment() && ok;
+    ok = TestLastFailureInModeReply() && ok;
+#if !defined(_WIN32)
+    ok = TestKilledChildReapIsBounded() && ok;
+    ok = TestCliChildEnvironmentIsStripped() && ok;
+#endif
     RequireVerb("ai.reset");
     return ok ? 0 : 1;
 }

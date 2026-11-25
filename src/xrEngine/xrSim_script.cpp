@@ -3,6 +3,7 @@
 #include "xrSimScript.h"
 
 #include "xrSim/xrSimBridge.h"
+#include "xrSim/xrSimClaudeCliProvider.h"
 
 #include "xrScriptEngine/script_space.hpp"
 
@@ -35,10 +36,14 @@ int xrsim_verb(lua_State* luaState)
     const std::string text = xrSim::HandleBridgeVerb(verb, std::string(payloadText, payloadSize), ok);
     return push_reply(luaState, ok, text);
 }
+
+// claude_cli warnings that have no reply to travel in (a child the runner gave up reaping), from its worker thread.
+void cli_warning(const char* line) { Msg("~ xrsim: %s", line); }
 } // namespace
 
 void xrsim_script_registrator::script_register(lua_State* luaState)
 {
     lua_pushcfunction(luaState, xrsim_verb);
     lua_setglobal(luaState, "xrsim_verb");
+    xrSim::SetCliWarningSink(&cli_warning);
 }

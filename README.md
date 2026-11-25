@@ -25,13 +25,14 @@ Last updated: 2026-11-25. Detailed inventory and evidence: [docs/PLAN_STATUS.md]
 
 ### Works now
 
-- **Freeplay population AI (experimental; macOS; operator-injected decisions only).** In Call of Chernobyl's freeplay, every living stalker and mutant gets exactly one AI decision owner: its squad, its mutant pack, or the NPC itself if it has no group. An owner decides where its group goes (stay, move to a site, retreat). The engine checks each decision against the sites it offered the owner, and the game's own NPCs then carry it out. Everything below was shown in Cordon on macOS with "recorded" decisions, typed in through the bridge by an operator, not made by a model:
+- **Freeplay population AI (experimental; macOS).** In Call of Chernobyl's freeplay, every living stalker and mutant gets exactly one AI decision owner: its squad, its mutant pack, or the NPC itself if it has no group. An owner decides where its group goes (stay, move to a site, retreat). The engine checks each decision against the sites it offered the owner, and the game's own NPCs then carry it out. Most of what follows was shown in Cordon on macOS with "recorded" decisions, typed in through the bridge by an operator; the one live-model run so far has its own bullet:
+  - **A model has decided in the game (one 15-minute run):** in Cordon on macOS, Claude (`claude-sonnet-5-5`, asked through the Claude Code CLI on a Claude subscription, capped at 5 decisions per minute) answered 75 wakes: 68 decisions accepted, 2 kept the current plan, 5 rejected (3 replies without the required block, 2 chose to stay with no site to stay at). 10 groups then arrived at the site the model chose, at least one of each owner kind. Median reply time was about 7.1 s. Every reply was an owner's first decision: after 15 minutes 108 of the 178 steerable owners still had no decision.
   - **Census:** about 25 s after loading a save, across all levels: 383 living NPCs, 195 owners, 182 of them steerable, 13 whose destination stays with CoC's own scripts, 0 NPCs without an owner.
   - **Decisions move real NPCs:** from the same starting state, one squad was sent to two different sites in two launches, neither of them the site stock CoC would have picked. It reached the Cordon site in 91.5 s, and the other site, in the Marsh, a different map, in 441.8 s. A lone stalker reached its site in 81.3 s. A mutant pack and a lone mutant also arrived, but at sites stock CoC would have picked too.
   - **Group changes:** a pack whose leader was removed kept its owner and objective and arrived; a decision made before a squad split is rejected as stale; a lone NPC that joins a group comes under the group's owner; a destination that becomes unavailable sends the owner back to its previous objective.
   - **Stock CoC scripts are not modified.** The adapter script (`res/coc/gamedata/scripts/xrsim_freeplay.script`) wraps CoC's own target selection while the game runs and restores the stock function when it is switched off or hits a Lua error. It is enabled with the launch flag `-xrsim_freeplay`; see the [Agent Bridge options](#agent-bridge) and [LLM Provider Configuration](#llm-provider-configuration).
   - **Clean runs:** recorded-mode sessions of about 46, 13, 12.5 and 10 minutes ended with no crash and no Lua error, and the regression gate passed with the flag off.
-  - **Tools and tests:** `tools/freeplay_runtime.py` clones a private test runtime and installs the adapter; `tools/freeplay_probe.py` runs a census, a single recorded move, or a watch of the decision ledger over the bridge. 52 freeplay library test functions (next to 76 + 14 existing xrSim ones) and 35 Python tool tests pass on macOS.
+  - **Tools and tests:** `tools/freeplay_runtime.py` clones a private test runtime and installs the adapter; `tools/freeplay_probe.py` runs a census, a single recorded move, or a watch of the decision ledger over the bridge; `tools/freeplay_play.py` starts a session on a Claude subscription with one command. 69 freeplay library test functions (next to 76 + 14 existing xrSim ones) and 57 Python freeplay tool tests pass on macOS.
 - **Engine fixes for background test instances:** the NPC sound player no longer crashes when sound is off; `-agent_sound` keeps audio in background mode; background instances present without vsync; on macOS they keep rendering while their window is covered (shown only with the Mac locked and the displays asleep).
 - **Stock campfire-story crash, root-caused:** CoC 1.4.22's `sound_theme.script` aborts when an online camp tells one of 45 stories that lack a `shuffle` setting. This is a bug in stock CoC; the original CoC engine aborts at the same line. `tools/freeplay_runtime.py` writes a generated config override for those stories into a runtime's `gamedata/`; the stock script is untouched and no CoC content is in this repository. See [Known Runtime Notes](#known-runtime-notes).
 - **Windows x64 build** via `src/engine.sln` (VS 2022 Build Tools, MSVC 14.44). CoC 1.4.22 played on GL (`renderer_rgl`).
@@ -45,10 +46,10 @@ Last updated: 2026-11-25. Detailed inventory and evidence: [docs/PLAN_STATUS.md]
 
 **Freeplay population AI**
 
-- **No model has made a decision in the game yet.** Every decision so far was recorded. A provider that uses a Claude subscription through the Claude Code CLI is in progress on a feature branch. A live run at Cordon scale also needs a decision on the provider timeout and call volume (about 1,000 or more calls per hour for 180 owners).
+- **Live-model decisions rest on one 15-minute run.** It did not get past each owner's first decision, and it did not exercise a blocked destination, a provider outage or a long session. Decisions are handed out oldest first across the player's level and its linked levels, so squads near the player are not asked first; at the default 6 decisions per minute a first pass over about 180 owners takes about 30 minutes. The Anthropic API provider has not been run in the game.
 - **Nothing is saved.** Objectives and owner identities are lost when a save is loaded and on every level change (a level change is a load). Activation is a launch flag, not an in-game setting.
 - **Not shown yet:** a group near the player (online) arriving at a destination stock CoC would not have picked; the mutant-pack pair of two different destinations; the Cordon to Darkscape move (the squad looped offline in Cordon, not diagnosed); the Cordon–Garbage crossing and any checks beyond Cordon.
-- **Known issues:** a squad whose own site refuses it (at night) loops `stay` → `blocked` → revert → `stay`, about once per 45 s; some held squads are locked without a `blocked` report; the probe's arrival rule disagrees with stock CoC's in one case; respawned squads can overfill a site; CoC's "help the actor" logic is still a second destination writer.
+- **Known issues:** the memory that stops an owner from choosing a just-refused site again is unit-tested only (no site was refused in the live run); some held squads are locked without a `blocked` report; the probe's arrival rule disagrees with stock CoC's in one case; respawned squads can overfill a site; CoC's "help the actor" logic is still a second destination writer.
 - **Performance is measured on one machine only, in background mode without vsync** (305 s each, same save; not a performance acceptance): wall-clock frame time median/p95 20.9/26.6 ms without the flag, 23.7/28.8 ms with recorded mode. The adapter's sync every 5 s takes 14–28 ms on average and up to 58 ms of main-thread time per call.
 - Traders such as Sidorovich and the Forester are not enrolled; persistence of companion orders is untested.
 - The Windows build of the new sources is unverified.
@@ -83,7 +84,7 @@ The engine never blocks a frame on the model. A late, offline or invalid provide
 
 **What exists today.** The freeplay population AI is the first piece of this that reaches a real game world. It covers the squad and pack layer: one decision owner per squad, mutant pack or lone NPC across the whole CoC freeplay population; decisions that are bounded commands (stay, move to a site, retreat), validated against what the owner was shown before they commit; and the engine and CoC's own scripts doing the walking, pathing, fighting and animation. A wake scheduler bounds how many owners think at once and never makes a frame wait.
 
-**What is still ahead:** decisions by a live model, individual minds for named stalkers, faction-level and Zone-level agents, ecology, objectives that persist in saves, and continuity across level changes.
+**What is still ahead:** live-model decisions beyond a first short run, individual minds for named stalkers, faction-level and Zone-level agents, ecology, objectives that persist in saves, and continuity across level changes.
 
 ### 2. Native renderers
 
@@ -108,7 +109,7 @@ The engine is developed by AI coding agents under human direction. The owner set
 - **2026-07-07 to 07-14:** AI foundation: `xrSim` world state, replayable tool log, provider contract and Anthropic transport, actor intent parser, mutant pack spawning through the bridge, asynchronous provider wakes. The OpenGL soak gate is defined; native renderer work is parked in favour of the GL runtime and AI.
 - **2026-11-07:** stability foundation and a private CoC runtime stager; frame-time telemetry with provenance sidecars; the fork is detached from OpenXRay's GitHub fork network.
 - **2026-11-08:** Windows bring-up in a day: first MSBuild build, TCP bridge transport, background mode, root cause of the squad-teleport crash, resolution-change fixes, CoC script API audit, the `.db` archive unpacker. The project is renamed Open Agentic XRay (earlier name OpenXVibeRay), and `main` is fast-forwarded to `dev`.
-- **2026-11-20 to 11-21:** freeplay population AI: [design](docs/superpowers/specs/2026-11-20-freeplay-population-ai-design.md), plan, implementation, live recorded-decision rounds in Cordon on macOS, and a final review fix wave.
+- **2026-11-20 to 11-25:** freeplay population AI: [design](docs/superpowers/specs/2026-11-20-freeplay-population-ai-design.md), plan, implementation, live recorded-decision rounds in Cordon on macOS, and a final review fix wave; then a provider that asks the Claude Code CLI, and on 11-25 the first run in which a model decided for the population.
 
 ## Supported Targets
 
@@ -211,6 +212,16 @@ If something goes wrong, check `build\runtime\coc\appdata\logs\` and attach that
 
 To read CoC scripts or configs: `python -I tools/xrdb_unpack.py <coc>/database/config/scripts.db <empty-dir> [scripts/]`.
 
+### 5. Play with AI on your Claude subscription (experimental, macOS/Linux)
+
+Freeplay AI gives every stalker squad, mutant pack and squadless NPC one decision owner; in `live` mode a Claude model picks where each squad goes next. It can run on your Claude subscription through Claude Code, with no API key:
+
+1. Install [Claude Code](https://docs.claude.com/en/docs/claude-code) and sign in once by running `claude` in a terminal (`claude auth status` should report `"loggedIn": true`).
+2. From the repository root: `python3 tools/freeplay_play.py` (runtime `build/runtime/play` by default; `--runtime <dir>` for another staged folder, `--dry-run` to see what it would do).
+3. The game starts and shows `AI freeplay is on: Claude subscription via Claude Code, model sonnet, up to 6 decisions per minute`. If something is missing, the launcher or the game says what to do in one sentence.
+
+What to expect: each decision is one Claude Code call (a few seconds each) and spends your subscription usage. Decisions come slowly. From a Cordon start about 180 stalker squads and mutant groups on the Cordon and its three neighbouring levels wait for one, in a single queue, oldest first, across all those levels (squads on the player's level are not served first). At the default 6 decisions per minute the first pass over them takes about half an hour (180 / 6 = 30 min); until its first decision a squad stays at the camp it was already assigned to (a squad with none waits in place). After that each owner is asked again at best about every half hour, because a reconsideration queues behind everyone already waiting. In a 15-minute test at 5 per minute, 108 of 178 owners had no decision yet. Raise the budget with `--calls-per-minute N` (more subscription usage) or lower it to spend less. The launcher installs the freeplay adapter and the story-theme fix into the runtime and starts the game from inside it. It is experimental, and decided destinations are not saved yet: after a load, squads start over from stock targets.
+
 ## Agent Bridge
 
 The bridge lets a script or agent run, control and screenshot the game. Protocol: [agent-bridge design](docs/superpowers/specs/2026-07-04-agent-bridge-design.md).
@@ -221,7 +232,7 @@ The bridge lets a script or agent run, control and screenshot the game. Protocol
 | `-agent_bridge_port <n>` | Windows: TCP port on 127.0.0.1; `0` or absent lets the OS pick. The bound port goes to `<appdata>/agent_bridge.port` |
 | `-agent_background` | Unattended instance: no focus, off-screen, windowed, no audio, no pause on focus loss, no error dialogs |
 | `-agent_sound` | With `-agent_background`: open the audio device anyway (silence it with `snd_volume_eff 0.` / `snd_volume_music 0.` in `user.ltx`); needed for long CoC sessions |
-| `-xrsim_freeplay recorded\|live` | Experimental, CoC runtime with the adapter installed by `tools/freeplay_runtime.py`: one AI decision owner per freeplay squad, mutant pack and squadless NPC. `recorded` takes decisions only from `ai.freeplay.decide`; `live` wakes owners through the provider below and **has not been exercised yet**. Status: [PLAN_STATUS](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21) |
+| `-xrsim_freeplay recorded\|live` | Experimental, CoC runtime with the adapter installed by `tools/freeplay_runtime.py`: one AI decision owner per freeplay squad, mutant pack and squadless NPC. `recorded` takes decisions only from `ai.freeplay.decide`; `live` wakes owners through the provider below (`claude_cli` on a Claude subscription or `anthropic` with an API key); one 15-minute `claude_cli` run on macOS is its only live evidence. Status: [PLAN_STATUS](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21) |
 
 `agentctl.py` accepts a Unix socket path, `tcp:HOST:PORT`, an `agent_bridge.port` file, or an appdata directory containing one. `--wait S` retries until the instance is up.
 
@@ -281,12 +292,28 @@ export XRAY_AGENT_TIMEOUT_MS=5000
 
 Missing curl, keys or network return coast values such as `network_adapter_not_linked` or `missing_api_key`; they are never fatal.
 
-Experimental freeplay live mode (`-xrsim_freeplay live`, see the options table) uses the same `XRAY_AGENT_PROVIDER`, `XRAY_AGENT_MODEL` and `ANTHROPIC_API_KEY` (or `XRAY_AGENT_API_KEY`). It needs `XRAY_AGENT_PROVIDER=anthropic` (the default when unset), an API key and an explicit `XRAY_AGENT_MODEL`, and refuses to start otherwise, in this order: `provider_disabled`, `missing_api_key`, `missing_model` (the source default model ID is not used), `transport_unavailable`. Set `XRAY_AGENT_TIMEOUT_MS` deliberately for a live run. It has not been run with a model yet; only recorded mode has live evidence.
+Experimental freeplay live mode (`-xrsim_freeplay live`, see the options table; [one-command start](#5-play-with-ai-on-your-claude-subscription-experimental-macoslinux)) has two providers. Reference:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `XRAY_AGENT_PROVIDER` | `claude_cli` or `anthropic` | unset: `anthropic` when an API key is set, otherwise `claude_cli` |
+| `XRAY_AGENT_MODEL` | model ID or alias | `claude_cli`: `sonnet`; `anthropic`: required |
+| `XRAY_AGENT_CLI` | Claude Code executable for `claude_cli` (one word: a bare name on `PATH` or an absolute path) | `claude` |
+| `XRAY_AGENT_TIMEOUT_MS` | per-call timeout (`claude_cli`: 1000–600000) | `claude_cli` 60000 |
+| `XRAY_FREEPLAY_MAX_IN_FLIGHT` | concurrent decisions, 1–8 | `claude_cli` 1, `anthropic` 2 |
+| `XRAY_FREEPLAY_CALLS_PER_MINUTE` | decisions handed to the provider (normally one CLI call each) in any rolling 60 s of engine time (`time_global`, real milliseconds while the game runs; not the in-game clock), 0 = no cap | `claude_cli` 6, `anthropic` 0 |
+| `XRAY_FREEPLAY_RECONSIDER_MS` | how often an idle owner is asked again, 60000–86400000 | 600000 |
+| `XRAY_FREEPLAY_MIN_WAKE_MS` | minimum time between two decisions of one owner, 5000–3600000 | 45000 |
+
+- **`claude_cli` (experimental)** runs the Claude Code CLI found on `PATH` (or `XRAY_AGENT_CLI`) in headless mode, `claude -p --model <m> --tools "" --no-session-persistence --strict-mcp-config --setting-sources "" --system-prompt ...`, with the login of the environment the game was launched from (a subscription login works). The game removes from the CLI's environment the API key and endpoint variables `ANTHROPIC_API_KEY`, `XRAY_AGENT_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`, and the variables of a running Claude Code session (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID` and others); the launcher removes the same list from the game's environment, and `CLAUDE_CONFIG_DIR` is kept. Each decision is one CLI call, at most 6 per minute by default. It runs on a worker thread from the system temp directory, never through a shell; a call that hangs is killed after the timeout. Refusals, in order: `invalid_model`, `invalid_cli`, `cli_unavailable`, `invalid_setting:<NAME>` (no `missing_model`: the default is `sonnet`). macOS/Linux only: on Windows it refuses with `unsupported_platform`.
+- **`anthropic`** uses `ANTHROPIC_API_KEY` (or `XRAY_AGENT_API_KEY`) and needs an explicit `XRAY_AGENT_MODEL`; refusals in order: `missing_api_key`, `missing_model` (the source default model ID is not used), `transport_unavailable`, `invalid_setting:<NAME>`. Set `XRAY_AGENT_TIMEOUT_MS` deliberately for a live run.
+
+Any other `XRAY_AGENT_PROVIDER` value refuses with `provider_disabled`. The `ai.freeplay.mode` reply shows the resolved provider, model and settings, and `last_failure=<reason>` while the provider backs off after a failure; the adapter turns both into one on-screen line.
 
 ## Tests and Verification
 
-- Standalone xrSim tests (any platform, no engine build): `cmake -S tools/xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-xrsim`, then run `xrSimWorldStateTests`, `xrSimAuthoritySpineTests` and `xrSimFreeplayTests` (76, 14 and 52 test functions; each exits non-zero on a failure); `tools/xrsim_standalone/build_and_test.sh` does all of it on macOS/Linux. `xrSimFreeplayTests` has not been built on Windows yet.
-- Freeplay tool tests: `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe` (35 tests). The CoC adapter script has no test suite in the repository.
+- Standalone xrSim tests (any platform, no engine build): `cmake -S tools/xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-xrsim`, then run `xrSimWorldStateTests`, `xrSimAuthoritySpineTests` and `xrSimFreeplayTests` (76, 14 and 69 test functions; each exits non-zero on a failure); `tools/xrsim_standalone/build_and_test.sh` does all of it on macOS/Linux. `xrSimFreeplayTests` has not been built on Windows yet.
+- Freeplay tool tests: `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe tools.tests.test_freeplay_play tools.tests.test_freeplay_adapter_messages` (57 tests; the adapter message test needs `luajit`). The rest of the CoC adapter script has no test suite in the repository.
 - CMake focused targets (`EXCLUDE_FROM_ALL`, build by name): `xrSimWorldStateTests`, `xrSimAuthoritySpineTests`, `xrUIShaderCacheTests`, `xrFrameTimeCollectorTests`, `xrFrameTimeCollectorBoundaryTests`, `xrFrameTimeSessionTests`, `xrMainMenuReloadTests`.
 - Python tooling: `py -m unittest tools.tests.test_agentctl`. Some other `tools/tests` cases exercise macOS-only behaviour (AF_UNIX, Mach-O) and fail on Windows.
 - Regression gate before merging engine changes: a private-save bridge scenario covering movement, save/load, UI and quit, run in background instances.
@@ -305,11 +332,11 @@ rg -n "FATAL|SCRIPT RUNTIME ERROR|no static|already at graph vertex|not found at
 ## Known Runtime Notes
 
 - Some CoC startup warnings are mod-script issues, not engine regressions.
-- Running without an audio device (`-nosound`, or `-agent_background` without `-agent_sound`) used to crash in the NPC sound player (null `CSound` in `CSoundPlayer::play`); fixed in `121d5b5ec` (on branch `feat/freeplay-population-ai`), where the player skips the write when sound is disabled.
+- Running without an audio device (`-nosound`, or `-agent_background` without `-agent_sound`) used to crash in the NPC sound player (null `CSound` in `CSoundPlayer::play`); fixed in `121d5b5ec`, where the player skips the write when sound is disabled.
 - CoC 1.4.22 has a stock campfire-story bug that is fatal on every engine, including the original CoC engine: `sound_theme.script` defaults an `npc` theme's `shuffle` to `"rand"`, which its `select_next_sound` does not handle, and 45 `strange_story_*` npc themes have no `shuffle`, so a story told by an online camp aborts at `sound_theme.script:206` (`played_id` nil). It affects an ordinary play folder too. On macOS (2026-11-21) it ended 11 of 15 Task 6 background launches near the Rookie village, all with `-agent_sound` (2 of them without the freeplay adapter); the Task 5 background runs without `-agent_sound` crashed the same way after about 100–150 s of play. Mitigation (`f9e134340`): `tools/freeplay_runtime.py` writes a generated config override with `shuffle = rnd` for those sections into a runtime's `gamedata/` (`clone` always does; for your own runtime run `python3 tools/freeplay_runtime.py install --runtime <runtime> --fix-story-themes`, which also copies the adapter script, inactive without `-xrsim_freeplay`). The stock script is not modified. With the override, two 511 s runs and the regression gate passed. Evidence: `docs/PLAN_STATUS.md` (Freeplay population AI).
 - With `-agent_sound`, the log can show `! [LUA]  Playing sound is not completed, but is destroying "<sound>"!` with a stack dump. It is an engine warning from the script sound destructor, not a Lua error.
 - macOS `-agent_background` instances render while their window is occluded since `4f6044610`; this was shown only with the Mac locked and the displays asleep.
-- On branch `feat/freeplay-population-ai`, `-agent_background` instances present without vsync (`d1d7a0877`), so frame-time captures taken in background mode are not vsync-paced.
+- `-agent_background` instances present without vsync (`d1d7a0877`), so frame-time captures taken in background mode are not vsync-paced.
 - Fullscreen resolution changes on Windows are not yet verified after the viewport fix.
 
 ## Repository Layout
