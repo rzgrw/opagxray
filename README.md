@@ -1,6 +1,6 @@
 # Open Agentic XRay
 
-Open Agentic XRay is a detached fork of [OpenXRay](https://github.com/OpenXRay/xray-16) that treats the original X-Ray Engine as foundation, not scripture. The goal is a modern, self-testable, agent-driven S.T.A.L.K.E.R. runtime: stable and consistent frame times first, then native Metal/Vulkan rendering and LLM-authored world simulation.
+Open Agentic XRay is a detached fork of [OpenXRay](https://github.com/OpenXRay/xray-16) that treats the original X-Ray Engine as foundation, not scripture. The goal is a modern, self-testable S.T.A.L.K.E.R. runtime whose Zone is run by AI agents: the population of the Zone decided by language models, on an engine that is stable, has consistent frame times, and later renders natively on Metal and Vulkan.
 
 The name says what it is: the open X-Ray engine, made agentic. Agents build and test it, and agents will run its Zone. The repository short name `opagxray` stands for **Op**en **Ag**entic **XRay**. The project was formerly called OpenXVibeRay; some data-format identifiers (`openxviberay-*-v1`) keep the old name for compatibility.
 
@@ -15,34 +15,54 @@ This is an engine project. It does not include S.T.A.L.K.E.R. game data, assets,
 
 ## Current Status
 
-Last updated: 2026-11-08. Detailed inventory: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md).
+Last updated: 2026-11-25. Detailed inventory and evidence: [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md).
 
-**Platform:** development has moved from macOS to **Windows 11**. The x64 Release build (MSBuild) runs Call of Chernobyl 1.4.22 on **OpenGL**, and the agent bridge now works on Windows, so the game can be launched, driven and screenshotted by scripts and coding agents, several instances at a time. macOS results in older docs are historical.
+**Platforms:** development happens on **Windows 11** and **macOS**. On Windows, the x64 Release build (MSBuild) runs Call of Chernobyl 1.4.22 on **OpenGL**, and the agent bridge lets scripts and coding agents launch, drive and screenshot the game, several instances at a time. The freeplay population AI (below) was built and run live on macOS (arm64, CMake build). Its new sources are listed in the Visual Studio project but have not been built on Windows yet.
 
-**Priority:** stability and frame-time consistency on OpenGL. Renderer replacement and further AI authority work wait behind it.
+**Priority:** on 2026-11-21 the owner chose to run the freeplay population AI ahead of the OpenGL stability and frame-time comparison, which had been the priority until then. That comparison is still open. Native renderer work stays paused.
 
-**Robustness policy:** script and mod-data mistakes should not abort the game; they are logged loudly (`! ...`) and play continues. Real engine-state corruption stays fatal. See [docs/windows-dev-setup.md](docs/windows-dev-setup.md#known-windows-issues) for the fixes so far; a dedicated `docs/ROBUSTNESS_POLICY.md` is in progress.
+**Robustness policy:** script and mod-data mistakes should not abort the game; they are logged loudly (`! ...`) and play continues. Real engine-state corruption stays fatal. See [docs/windows-dev-setup.md](docs/windows-dev-setup.md#known-windows-issues) for the fixes so far.
 
 ### Works now
 
+- **Freeplay population AI (experimental; macOS; operator-injected decisions only).** In Call of Chernobyl's freeplay, every living stalker and mutant gets exactly one AI decision owner: its squad, its mutant pack, or the NPC itself if it has no group. An owner decides where its group goes (stay, move to a site, retreat). The engine checks each decision against the sites it offered the owner, and the game's own NPCs then carry it out. Everything below was shown in Cordon on macOS with "recorded" decisions, typed in through the bridge by an operator, not made by a model:
+  - **Census:** about 25 s after loading a save, across all levels: 383 living NPCs, 195 owners, 182 of them steerable, 13 whose destination stays with CoC's own scripts, 0 NPCs without an owner.
+  - **Decisions move real NPCs:** from the same starting state, one squad was sent to two different sites in two launches, neither of them the site stock CoC would have picked. It reached the Cordon site in 91.5 s, and the other site, in the Marsh, a different map, in 441.8 s. A lone stalker reached its site in 81.3 s. A mutant pack and a lone mutant also arrived, but at sites stock CoC would have picked too.
+  - **Group changes:** a pack whose leader was removed kept its owner and objective and arrived; a decision made before a squad split is rejected as stale; a lone NPC that joins a group comes under the group's owner; a destination that becomes unavailable sends the owner back to its previous objective.
+  - **Stock CoC scripts are not modified.** The adapter script (`res/coc/gamedata/scripts/xrsim_freeplay.script`) wraps CoC's own target selection while the game runs and restores the stock function when it is switched off or hits a Lua error. It is enabled with the launch flag `-xrsim_freeplay`; see the [Agent Bridge options](#agent-bridge) and [LLM Provider Configuration](#llm-provider-configuration).
+  - **Clean runs:** recorded-mode sessions of 46, 13.5, 12.5 and 10 minutes ended with no crash and no Lua error, and the regression gate passed with the flag off.
+  - **Tools and tests:** `tools/freeplay_runtime.py` clones a private test runtime and installs the adapter; `tools/freeplay_probe.py` runs a census, a single recorded move, or a watch of the decision ledger over the bridge. 52 freeplay library test functions (next to 76 + 14 existing xrSim ones) and 35 Python tool tests pass on macOS.
+- **Engine fixes for background test instances:** the NPC sound player no longer crashes when sound is off; `-agent_sound` keeps audio in background mode; background instances present without vsync; on macOS they keep rendering while their window is covered (shown only with the Mac locked and the displays asleep).
+- **Stock campfire-story crash, root-caused:** CoC 1.4.22's `sound_theme.script` aborts when an online camp tells one of 45 stories that lack a `shuffle` setting. This is a bug in stock CoC; the original CoC engine aborts at the same line. `tools/freeplay_runtime.py` writes a generated config override for those stories into a runtime's `gamedata/`; the stock script is untouched and no CoC content is in this repository. See [Known Runtime Notes](#known-runtime-notes).
 - **Windows x64 build** via `src/engine.sln` (VS 2022 Build Tools, MSVC 14.44). CoC 1.4.22 played on GL (`renderer_rgl`).
 - **Agent bridge on Windows and POSIX:** TCP on `127.0.0.1` on Windows (port written to `<appdata>/agent_bridge.port`), Unix socket on macOS/Linux. One client, `tools/agentctl.py`, for both.
-- **Background instances (`-agent_background`):** window never takes focus, stays off-screen and windowed, no audio device, never pauses when unfocused. Combined with per-instance appdata and ports, several game instances run side by side without touching the user's desktop.
+- **Background instances (`-agent_background`):** the window never takes focus, stays off-screen and windowed, has no audio device and never pauses when unfocused. With per-instance appdata and ports, several game instances run side by side without touching the user's desktop.
 - **Frame-time telemetry (opt-in):** `perf.*` bridge verbs, export on Windows and POSIX, `tools/frame_time_report.py`, provenance sidecars. Measurement infrastructure only; no performance gain is claimed.
-- **CoC stability fixes:**
-  - CoC key-binding constants are plain Lua tables, so missing keys read as nil instead of crashing (`no static 'DIK_NUMPADENTER'`).
-  - Root-cause fix for the ALife "already found in the registry" crash: `teleport_object` no longer puts squad members into the graph vertex registry when CoC's `TeleportSquad` runs. The duplicate guard stays as a logged safety net.
-  - GL resolution changes: viewport reset on device reset; the window-fit code no longer feeds its own resize back into the saved `vid_mode`.
-  - Page Up/Page Down were swapped in the script key table; four missing DirectInput key names added. Audit: [docs/COC_SCRIPT_API_COMPAT_2026-11-08.md](docs/COC_SCRIPT_API_COMPAT_2026-11-08.md).
-- **AI foundation:** `xrSimCore` world state, deterministic tool log, snapshot/restore/replay; thin LLM harness for squad and mutant-pack actors; async cancellable provider wakes; live-session mutant pack spawning; canonical Zone state (Gate 1 Task 1). Standalone `xrSimCore` tests build and pass under MSVC.
+- **CoC stability fixes (Windows, build-verified):** key-binding constants are plain Lua tables, so missing keys read as nil instead of crashing; root-cause fix for the ALife "already found in the registry" crash (`teleport_object` no longer registers squad members at a graph vertex when CoC's `TeleportSquad` runs); GL viewport reset after a resolution change; Page Up/Page Down swap and missing DirectInput key names fixed ([script API audit](docs/COC_SCRIPT_API_COMPAT_2026-11-08.md)).
+- **AI foundation:** `xrSimCore` world state, deterministic tool log, snapshot/restore/replay; thin LLM harness for squad and mutant-pack actors; asynchronous, cancellable provider wakes; mutant pack spawning through the bridge; canonical Zone state (Gate 1 Task 1). The standalone `xrSimCore` tests built and passed under MSVC on 2026-11-08, before the freeplay tests were added.
 
 ### Not done yet
 
-- In-game verification of the CoC crash fixes above (all are build-verified; resolution changes verified windowed/borderless only).
-- Long multi-instance soaks on Windows (harness in progress) and accepted frame-time captures.
-- Live LLM provider on Windows: no libcurl in the MSBuild route, so provider wakes coast.
+**Freeplay population AI**
+
+- **No model has made a decision in the game yet.** Every decision so far was recorded. A provider that uses a Claude subscription through the Claude Code CLI is in progress on a feature branch. A live run at Cordon scale also needs a decision on the provider timeout and call volume (about 1,000 or more calls per hour for 180 owners).
+- **Nothing is saved.** Objectives and owner identities are lost when a save is loaded and on every level change (a level change is a load). Activation is a launch flag, not an in-game setting.
+- **Not shown yet:** a group near the player (online) arriving at a destination stock CoC would not have picked; the mutant-pack pair of two different destinations; the Cordon to Darkscape move (the squad looped offline in Cordon, not diagnosed); the Cordon–Garbage crossing and any checks beyond Cordon.
+- **Known issues:** a squad whose own site refuses it (at night) loops `stay` → `blocked` → revert → `stay`, about once per 45 s; some held squads are locked without a `blocked` report; the probe's arrival rule disagrees with stock CoC's in one case; respawned squads can overfill a site; CoC's "help the actor" logic is still a second destination writer.
+- **Performance is measured on one machine only, in background mode without vsync** (305 s each, same save; not a performance acceptance): wall-clock frame time median/p95 20.9/26.6 ms without the flag, 23.7/28.8 ms with recorded mode. The adapter's sync every 5 s costs 20–60 ms of main-thread FrameMove time.
+- Traders such as Sidorovich and the Forester are not enrolled; persistence of companion orders is untested.
+- The Windows build of the new sources is unverified.
+
+**Engine and Windows**
+
+- In-game verification of the Windows CoC crash fixes above (build-verified; resolution changes checked windowed/borderless only).
+- The OpenGL stability and frame-time comparison: long multi-instance soaks on Windows and accepted frame-time captures.
+- Live LLM provider on Windows: the MSBuild route has no libcurl, so provider wakes coast.
 - CMake + Ninja build on Windows (unverified; MSBuild is the working route).
-- Authority-spine Tasks 2+, full replacement of legacy stalker/monster AI, full ALife ownership for LLM packs.
+
+**Longer term**
+
+- Authority-spine Tasks 2+, full replacement of the legacy stalker/monster AI, full ALife ownership for LLM packs.
 - Native Metal in-game renderer (parked) and Vulkan (not started).
 
 ## Direction
@@ -61,13 +81,38 @@ Last updated: 2026-11-08. Detailed inventory: [docs/PLAN_STATUS.md](docs/PLAN_ST
 
 The engine never blocks a frame on the model. A late, offline or invalid provider makes the actor coast on its last valid intent and degrade to minimal survival behaviour.
 
+**What exists today.** The freeplay population AI is the first piece of this that reaches a real game world. It covers the squad and pack layer: one decision owner per squad, mutant pack or lone NPC across the whole CoC freeplay population; decisions that are bounded commands (stay, move to a site, retreat), validated against what the owner was shown before they commit; and the engine and CoC's own scripts doing the walking, pathing, fighting and animation. A wake scheduler bounds how many owners think at once and never makes a frame wait.
+
+**What is still ahead:** decisions by a live model, individual minds for named stalkers, faction-level and Zone-level agents, ecology, objectives that persist in saves, and continuity across level changes.
+
 ### 2. Native renderers
 
 OpenGL is the current host runtime, not the destination. Plan of record is dual native: **Metal on macOS** (menu first frame done, in-game bring-up parked) and **Vulkan on Windows/Linux** (not started). See the [engine roadmap](docs/superpowers/specs/2026-07-05-engine-roadmap-v2.md).
 
+## How this project is built
+
+The engine is developed by AI coding agents under human direction. The owner sets priorities, chooses between designs and decides what merges; agents write the specs, code, tests and status records. Commit trailers and branch names show which agents: Claude models on most of the fork's commits, plus Codex, Kimi Code CLI and Grok for implementation and independent review.
+
+- **Specs, then plans.** A feature starts as a written design in [`docs/superpowers/specs/`](docs/superpowers/specs/), then becomes an implementation plan in [`docs/superpowers/plans/`](docs/superpowers/plans/) with tasks, files, interfaces, tests and review focus points.
+- **One agent implements, another reviews.** Plans are executed task by task: each task goes to one agent and its result is reviewed by another, and the coordinator records rulings on deviations. The whole branch then gets a final review. The [freeplay plan](docs/superpowers/plans/2026-11-20-freeplay-population-ai.md) is an example: seven tasks, follow-up rounds F1–F4, and a final review whose findings were fixed in a last wave, all recorded in [PLAN_STATUS](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21).
+- **Agents test in the running game.** The [agent bridge](#agent-bridge) lets an agent launch the game in a background instance, press keys, run console commands and Lua, read state and take screenshots, so agents check their own work in play, not only in unit tests.
+- **Evidence first.** [PLAN_STATUS](docs/PLAN_STATUS.md) says what was run, on which platform, what passed, what failed and what was not exercised. A feature is not called done because its code exists.
+
+## Project history
+
+- **2026-03-29:** the project starts with a [design spec](docs/superpowers/specs/2026-03-29-macos-metal-port-design.md) for a native macOS port with a Metal renderer. The same day, C++ exceptions are disabled on macOS (`b9b78a979`): they cannot pass through LuaJIT's ARM64 trampoline, so a throw during ALife object removal ended the process. Failures become values from then on.
+- **2026-03-30 to 07-06:** Metal backend and a GLSL-to-MSL shader pipeline; on 07-06 the first Metal frame, the CoC main menu (`1ed42b1f1`).
+- **2026-07-03:** macOS stabilization: crashed processes become killable, logs survive crashes, exit no longer hangs.
+- **2026-07-04:** [agent bridge](docs/superpowers/specs/2026-07-04-agent-bridge-design.md) v1 (`9162c534e`), a socket control channel for autonomous testing.
+- **2026-07-05:** the roadmap is rewritten several times in one day: Vulkan everywhere, then dual native renderers; the LLM-simulated Zone becomes the centrepiece ([agentic Zone](docs/superpowers/specs/2026-07-05-agentic-zone-design.md)).
+- **2026-07-07 to 07-14:** AI foundation: `xrSim` world state, replayable tool log, provider contract and Anthropic transport, actor intent parser, mutant pack spawning through the bridge, asynchronous provider wakes. The OpenGL soak gate is defined; native renderer work is parked in favour of the GL runtime and AI.
+- **2026-11-07:** stability foundation and a private CoC runtime stager; frame-time telemetry with provenance sidecars; the fork is detached from OpenXRay's GitHub fork network.
+- **2026-11-08:** Windows bring-up in a day: first MSBuild build, TCP bridge transport, background mode, root cause of the squad-teleport crash, resolution-change fixes, CoC script API audit, the `.db` archive unpacker. The project is renamed Open Agentic XRay (earlier name OpenXVibeRay), and `main` is fast-forwarded to `dev`.
+- **2026-11-20 to 11-21:** freeplay population AI: [design](docs/superpowers/specs/2026-11-20-freeplay-population-ai-design.md), plan, implementation, live recorded-decision rounds in Cordon on macOS, and a final review fix wave.
+
 ## Supported Targets
 
-- Primary: Call of Chernobyl (1.4.12 base + 1.4.22 patch), OpenGL renderer, Windows 11 x64. macOS Apple Silicon is the historical baseline.
+- Primary: Call of Chernobyl (1.4.12 base + 1.4.22 patch), OpenGL renderer, on Windows 11 x64 and macOS Apple Silicon.
 - Upstream compatibility goals: Call of Pripyat 1.6.02, Clear Sky 1.5.10, Linux.
 
 ## Build on Windows
@@ -240,7 +285,8 @@ Experimental freeplay live mode (`-xrsim_freeplay live`, see the options table) 
 
 ## Tests and Verification
 
-- Standalone xrSim tests (any platform, no engine build): `cmake -S tools/xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-xrsim`, then run `xrSimAuthoritySpineTests`, `xrSimWorldStateTests` and (on the freeplay branch) `xrSimFreeplayTests`; `tools/xrsim_standalone/build_and_test.sh` does all of it on macOS/Linux. Freeplay tool tests: `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe`.
+- Standalone xrSim tests (any platform, no engine build): `cmake -S tools/xrsim_standalone -B build-xrsim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-xrsim`, then run `xrSimWorldStateTests`, `xrSimAuthoritySpineTests` and `xrSimFreeplayTests` (76, 14 and 52 test functions; each exits non-zero on a failure); `tools/xrsim_standalone/build_and_test.sh` does all of it on macOS/Linux. `xrSimFreeplayTests` has not been built on Windows yet.
+- Freeplay tool tests: `python3 -m unittest tools.tests.test_freeplay_runtime tools.tests.test_freeplay_probe` (35 tests). The CoC adapter script has no test suite in the repository.
 - CMake focused targets (`EXCLUDE_FROM_ALL`, build by name): `xrSimWorldStateTests`, `xrSimAuthoritySpineTests`, `xrUIShaderCacheTests`, `xrFrameTimeCollectorTests`, `xrFrameTimeCollectorBoundaryTests`, `xrFrameTimeSessionTests`, `xrMainMenuReloadTests`.
 - Python tooling: `py -m unittest tools.tests.test_agentctl`. Some other `tools/tests` cases exercise macOS-only behaviour (AF_UNIX, Mach-O) and fail on Windows.
 - Regression gate before merging engine changes: a private-save bridge scenario covering movement, save/load, UI and quit, run in background instances.
@@ -274,6 +320,8 @@ src/
   xrCore/                Platform abstractions, filesystem, threading, debug
   xrEngine/              Core engine, SDL2, input, console, AgentBridge, FrameTime*
   xrEngine/xrSim/        Thin AI simulation harness and provider bridge
+                         (xrSimFreeplay*: freeplay owners, decisions, wake scheduler, ai.freeplay verbs)
+  xrEngine/xrSim_script.cpp  xrsim_verb, the Lua entry point the CoC adapter calls
   xrGame/                Game logic, ALife, Lua bindings, live object spawning
   xrSound/               OpenAL sound layer
   Layers/
@@ -285,12 +333,18 @@ src/
     xrRender_R2/         Shared render phases and CRender logic
   engine.sln             MSBuild solution (working Windows route)
 
+res/coc/gamedata/scripts/
+  xrsim_freeplay.script  CoC freeplay adapter (inactive without -xrsim_freeplay)
+
 tools/
   agentctl.py            Agent bridge client (socket, tcp:, port file, appdata dir)
   stage_coc_runtime.py   Private CoC runtime stager
   xrdb_unpack.py         X-Ray .db archive unpacker
   frame_time_report.py   Frame-time capture report
   frame_time_provenance.py  Capture provenance sidecars
+  frame_overhead*.py     Opt-in frame-overhead probe parser and campaign runner
+  freeplay_runtime.py    Clone a private CoC test runtime; install the freeplay adapter
+  freeplay_probe.py      Freeplay census, recorded move and ledger watch over the bridge
   xrsim_standalone/      Standalone xrSimCore test project
   *.txt                  Bridge scenario scripts
 
@@ -307,7 +361,8 @@ docs/
 ## Important Docs
 
 - [Play Call of Chernobyl](#play-call-of-chernobyl): asset packs, staging and launch, step by step.
-- [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md): current inventory, shipped refs, open acceptance. Read first.
+- [docs/PLAN_STATUS.md](docs/PLAN_STATUS.md): current inventory, shipped refs, open acceptance, freeplay evidence. Read first.
+- Freeplay population AI: [design](docs/superpowers/specs/2026-11-20-freeplay-population-ai-design.md), [implementation plan](docs/superpowers/plans/2026-11-20-freeplay-population-ai.md), [status and evidence](docs/PLAN_STATUS.md#freeplay-population-ai--2026-11-21).
 - [docs/windows-dev-setup.md](docs/windows-dev-setup.md): Windows toolchain, build, bridge, background instances, known issues.
 - [docs/COC_SCRIPT_API_COMPAT_2026-11-08.md](docs/COC_SCRIPT_API_COMPAT_2026-11-08.md): CoC script vs engine API audit.
 - [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md): transfer context and archive-tag recovery.
